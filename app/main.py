@@ -10,6 +10,7 @@ app = FastAPI(title=settings.PROJECT_NAME)
 # Configurar CORS (para que tu Next.js pueda conectarse)
 origins = [
     "http://localhost:3000",
+    "https://sindic.xyz"
 ]
 
 app.add_middleware(
