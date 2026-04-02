@@ -12,3 +12,7 @@ wheels/
 # Local env
 .env
 .agents/
+.cache/
+.uv-cache/
+.pytest_cache/
+.ruff_cache/

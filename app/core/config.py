@@ -1,16 +1,22 @@
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "Quinisindic Backend API"
     API_V1_STR: str = "/api/v1"
-    
-    # Aquí pondrás tus claves de Supabase o Oracle en el futuro
+
     SUPABASE_URL: str
     SUPABASE_KEY: str
     SUPABASE_SERVICE_ROLE_KEY: str
+    INTERNAL_API_KEY: str | None = None
+    FRONTEND_ORIGINS: str = "http://localhost:3000"
 
-    class Config:
-        env_file = ".env"
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    @property
+    def cors_origins(self) -> list[str]:
+        return [origin.strip() for origin in self.FRONTEND_ORIGINS.split(",") if origin.strip()]
+
 
 settings = Settings()
 
@@ -62,19 +68,40 @@ settings = Settings()
 
 FOTMOB_TARGET_LEAGUE_IDS = {
     # Alemania
-    54, 209, 8924,
+    54,
+    209,
+    8924,
     # España
-    87, 138, 139,
+    87,
+    138,
+    139,
     # Francia
-    53, 134, 207,
+    53,
+    134,
+    207,
     # Inglaterra
-    47, 132, 133, 247,
+    47,
+    132,
+    133,
+    247,
     # Italia
-    55, 141, 222,
+    55,
+    141,
+    222,
     # Europa
-    42, 73, 10216, 74, 50, 9806,
+    42,
+    73,
+    10216,
+    74,
+    50,
+    9806,
     # Sudamérica
-    45, 44,
+    45,
+    44,
     # Internacional
-    78, 10703, 10304, 66, 77,
+    78,
+    10703,
+    10304,
+    66,
+    77,
 }
