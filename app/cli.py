@@ -7,6 +7,7 @@ from pathlib import Path
 import uvicorn
 
 from app.domains.football_v2 import FootballBootstrapService
+from app.domains.football_v2.post_match_worker import main as worker_football_post_match_main
 from app.domains.football_v2.worker import main as worker_football_main
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -52,5 +53,9 @@ def bootstrap_football_entry() -> None:
         print(f"{key}: {value}")
 
 
-def worker_football_entry() -> None:
+def worker_football_live_entry() -> None:
     worker_football_main()
+
+
+def worker_football_post_match_entry() -> None:
+    worker_football_post_match_main()

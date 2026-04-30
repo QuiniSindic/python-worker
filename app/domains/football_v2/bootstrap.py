@@ -78,13 +78,35 @@ class FootballBootstrapService:
         if not sport:
             raise RuntimeError("Sport 'football' not found. Run core seed migration first.")
 
+        return await self.run_for_definitions(
+            FOOTBALL_COMPETITIONS,
+            sport_id=sport["id"],
+            state_key="bootstrap-football",
+        )
+
+    async def run_for_definitions(
+        self,
+        definitions: list[FootballCompetitionDefinition]
+        | tuple[FootballCompetitionDefinition, ...],
+        *,
+        sport_id: int | None = None,
+        state_key: str | None = None,
+    ) -> dict[str, int]:
+        resolved_sport_id = sport_id
+        if resolved_sport_id is None:
+            sport = self.repository.get_sport_by_slug("football")
+            if not sport:
+                raise RuntimeError("Sport 'football' not found. Run core seed migration first.")
+            resolved_sport_id = sport["id"]
+
         totals = defaultdict(int)
-        for definition in FOOTBALL_COMPETITIONS:
+        for definition in definitions:
             logger.info("Bootstrapping football competition %s", definition.slug)
-            stats = await self._sync_competition(sport["id"], definition)
+            stats = await self._sync_competition(resolved_sport_id, definition)
             for key, value in stats.items():
                 totals[key] += value
-        self.repository.upsert_sync_state("fotmob", "football", "bootstrap-football", dict(totals))
+        if state_key:
+            self.repository.upsert_sync_state("fotmob", "football", state_key, dict(totals))
         return dict(totals)
 
     async def _sync_competition(

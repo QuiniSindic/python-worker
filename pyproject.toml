@@ -28,7 +28,8 @@ api-dev = "app.cli:api_dev_main"
 check = "app.cli:check_entry"
 test = "app.cli:test_entry"
 bootstrap-football = "app.cli:bootstrap_football_entry"
-worker-football = "app.cli:worker_football_entry"
+worker-football-live = "app.cli:worker_football_live_entry"
+worker-football-post-match = "app.cli:worker_football_post_match_entry"
 
 [tool.setuptools.packages.find]
 include = ["app*"]

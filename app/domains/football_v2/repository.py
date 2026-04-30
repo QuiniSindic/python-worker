@@ -107,6 +107,7 @@ class FootballV2Repository:
         bucket: str,
         from_date: str | None = None,
         to_date: str | None = None,
+        limit: int | None = None,
     ) -> list[dict]:
         if not season_ids:
             return []
@@ -121,7 +122,31 @@ class FootballV2Repository:
             query = query.gte("start_at", f"{from_date}T00:00:00+00:00")
         if to_date:
             query = query.lte("start_at", f"{to_date}T23:59:59+00:00")
+        if limit is not None:
+            query = query.limit(limit)
         return query.order("start_at", desc=bucket == "results").execute().data or []
+
+    def list_recoverable_live_events(
+        self,
+        provider_name: str,
+        *,
+        started_after: str,
+        started_before: str,
+        limit: int | None = None,
+    ) -> list[dict]:
+        query = (
+            self.supabase.table("events")
+            .select("id,provider_event_id,start_at,status")
+            .eq("provider_name", provider_name)
+            .eq("event_type", "match")
+            .eq("status", "live")
+            .gte("start_at", started_after)
+            .lte("start_at", started_before)
+            .order("start_at")
+        )
+        if limit is not None:
+            query = query.limit(limit)
+        return query.execute().data or []
 
     def get_event(self, event_id: int) -> dict | None:
         rows = (
@@ -137,6 +162,26 @@ class FootballV2Repository:
         for chunk in _chunked(event_ids):
             rows.extend(
                 self.supabase.table("events").select("*").in_("id", chunk).execute().data or []
+            )
+        return rows
+
+    def list_events_by_provider_event_ids(
+        self,
+        provider_name: str,
+        provider_event_ids: list[str],
+    ) -> list[dict]:
+        if not provider_event_ids:
+            return []
+        rows: list[dict] = []
+        for chunk in _chunked([int(item) for item in provider_event_ids if str(item).isdigit()]):
+            rows.extend(
+                self.supabase.table("events")
+                .select("*")
+                .eq("provider_name", provider_name)
+                .in_("provider_event_id", [str(item) for item in chunk])
+                .execute()
+                .data
+                or []
             )
         return rows
 

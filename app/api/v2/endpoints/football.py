@@ -27,12 +27,14 @@ def get_live_events(
     competition_id: int | None = Query(default=None, gt=0),
     from_date: str | None = Query(default=None),
     to_date: str | None = Query(default=None),
+    limit: int | None = Query(default=None, ge=1, le=100),
 ) -> list[CompetitionDataResponse]:
     return service.get_event_feed(
         bucket="live",
         competition_id=competition_id,
         from_date=from_date,
         to_date=to_date,
+        limit=limit,
     )
 
 
@@ -41,12 +43,14 @@ def get_result_events(
     competition_id: int | None = Query(default=None, gt=0),
     from_date: str | None = Query(default=None),
     to_date: str | None = Query(default=None),
+    limit: int | None = Query(default=None, ge=1, le=100),
 ) -> list[CompetitionDataResponse]:
     return service.get_event_feed(
         bucket="results",
         competition_id=competition_id,
         from_date=from_date,
         to_date=to_date,
+        limit=limit,
     )
 
 

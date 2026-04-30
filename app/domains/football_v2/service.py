@@ -29,6 +29,10 @@ from app.schemas.football import (
 )
 from app.schemas.leaderboard import LeaderboardEntry, LeaderboardFilterOptions
 
+DEFAULT_GLOBAL_FEED_LIMIT = 30
+DEFAULT_COMPETITION_FEED_LIMIT = 50
+MAX_FEED_LIMIT = 100
+
 
 def _map_status(status_value: str) -> str:
     return {
@@ -109,10 +113,19 @@ class FootballV2Service:
         competition_id: int | None = None,
         from_date: str | None = None,
         to_date: str | None = None,
+        limit: int | None = None,
     ) -> list[CompetitionDataResponse]:
         season_ids = self._resolve_feed_season_ids(competition_id)
+        resolved_limit = self._resolve_feed_limit(competition_id, limit)
         return self._group_matches_by_competition(
-            self.repository.list_events_for_seasons(season_ids, bucket, from_date, to_date)
+            self.repository.list_events_for_seasons(
+                season_ids,
+                bucket,
+                from_date,
+                to_date,
+                resolved_limit,
+            ),
+            bucket,
         )
 
     def get_event(self, event_id: int) -> MatchResponse:
@@ -403,6 +416,7 @@ class FootballV2Service:
                 username=profiles.get(row["user_id"], {}).get("username", "Usuario"),
                 matchId=row["event_id"],
                 kickoff=matches[row["event_id"]].kickoff,
+                kickoffIso=matches[row["event_id"]].kickoffIso,
                 matchStatus=matches[row["event_id"]].status,
                 homeTeam=matches[row["event_id"]].homeTeam.name,
                 awayTeam=matches[row["event_id"]].awayTeam.name,
@@ -485,10 +499,29 @@ class FootballV2Service:
             return [season["id"]] if season else []
         return [row["id"] for row in self.repository.list_current_seasons()]
 
+    def _resolve_feed_limit(self, competition_id: int | None, limit: int | None) -> int:
+        if limit is None:
+            return (
+                DEFAULT_COMPETITION_FEED_LIMIT
+                if competition_id is not None
+                else DEFAULT_GLOBAL_FEED_LIMIT
+            )
+
+        return max(1, min(limit, MAX_FEED_LIMIT))
+
     def _group_matches_by_competition(
-        self, event_rows: list[dict]
+        self, event_rows: list[dict], bucket: Literal["live", "results"]
     ) -> list[CompetitionDataResponse]:
-        matches = self._map_match_payloads(event_rows)
+        sorted_rows = sorted(
+            event_rows,
+            key=lambda row: (
+                _sortable_kickoff(row.get("start_at")),
+                row["competition_id"],
+                row["id"],
+            ),
+            reverse=bucket == "results",
+        )
+        matches = self._map_match_payloads(sorted_rows)
         grouped: dict[int, list[MatchResponse]] = defaultdict(list)
         for row in matches:
             grouped[row.competitionid].append(row)
@@ -508,9 +541,7 @@ class FootballV2Service:
                 edition=self._map_edition(seasons.get(competition_id)),
                 matches=competition_matches,
             )
-            for competition_id, competition_matches in sorted(
-                grouped.items(), key=lambda item: competitions[item[0]]["name"]
-            )
+            for competition_id, competition_matches in grouped.items()
             if competition_id in competitions
         ]
 
@@ -593,6 +624,7 @@ class FootballV2Service:
                     BracketLegResponse(
                         eventId=match["event"]["id"],
                         kickoff=_format_kickoff(match["event"].get("start_at")),
+                        kickoffIso=match["event"].get("start_at"),
                         status=_map_status(match["event"]["status"]),
                         minute=match["football"].get("minute"),
                         result=self._format_result(match["football"]),
@@ -684,6 +716,7 @@ class FootballV2Service:
                     status=_map_status(row["status"]),
                     result=self._format_result(football),
                     kickoff=_format_kickoff(row["start_at"]),
+                    kickoffIso=row.get("start_at"),
                     minute=football.get("minute"),
                     homeId=home.id,
                     awayId=away.id,

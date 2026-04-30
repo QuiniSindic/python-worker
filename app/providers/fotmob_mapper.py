@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime
 from typing import Any
 
@@ -10,6 +11,8 @@ logger = logging.getLogger(__name__)
 
 
 class FotmobMapper:
+    _BEST_THIRD_PATTERN = re.compile(r"\b(?:3rd|third|tercer(?:os?)?)\b", re.IGNORECASE)
+
     @staticmethod
     def _group_letter(index: int) -> str:
         letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -24,7 +27,7 @@ class FotmobMapper:
         normalized = str(raw_name or "").strip()
         normalized_lower = normalized.lower()
 
-        if "third" in normalized_lower or "tercer" in normalized_lower:
+        if cls._BEST_THIRD_PATTERN.search(normalized_lower):
             return "best_third_placed", "Mejores terceros"
 
         if normalized:
@@ -101,6 +104,251 @@ class FotmobMapper:
         if competition_id is None:
             return None
         return f"https://images.fotmob.com/image_resources/logo/leaguelogo/{competition_id}.png"
+
+    @staticmethod
+    def _clean_text(value: Any) -> str | None:
+        if value is None:
+            return None
+
+        text = str(value).strip()
+        return text or None
+
+    @classmethod
+    def _event_side(cls, event: dict[str, Any]) -> str:
+        is_home = event.get("isHome")
+        if is_home is True:
+            return "home"
+        if is_home is False:
+            return "away"
+        return "neutral"
+
+    @classmethod
+    def _event_title_candidates(cls, event: dict[str, Any]) -> list[str]:
+        player = event.get("player")
+        player_name = player.get("name") if isinstance(player, dict) else None
+        return [
+            value
+            for value in (
+                player_name,
+                event.get("text"),
+                event.get("description"),
+                event.get("name"),
+            )
+            if cls._clean_text(value) is not None
+        ]
+
+    @staticmethod
+    def _normalize_event_type(raw_type: Any) -> str:
+        normalized = str(raw_type or "").strip().lower()
+        mapping = {
+            "goal": "Goal",
+            "penaltygoal": "PenaltyGoal",
+            "missedpenalty": "MissedPenalty",
+            "failedpenalty": "FailedPenalty",
+            "card": "Card",
+            "substitution": "Substitution",
+            "addedtime": "AddedTime",
+            "half": "Half",
+            "var": "Var",
+        }
+        return mapping.get(normalized, str(raw_type or "Other"))
+
+    @staticmethod
+    def _normalize_card_type(raw_card_type: Any) -> str | None:
+        normalized = str(raw_card_type or "").strip()
+        if not normalized:
+            return None
+
+        compact = normalized.lower().replace("-", "").replace("_", "")
+        if compact in {"yellow"}:
+            return "Yellow"
+        if compact in {"red"}:
+            return "Red"
+        if compact in {"yellowred", "secondyellow", "secondyellowred"}:
+            return "YellowRed"
+        return normalized
+
+    @classmethod
+    def _is_penalty_goal_event(cls, event: dict[str, Any]) -> bool:
+        goal_description = cls._clean_text(event.get("goalDescription"))
+        goal_description_key = cls._clean_text(event.get("goalDescriptionKey"))
+        suffix = cls._clean_text(event.get("suffix"))
+        suffix_key = cls._clean_text(event.get("suffixKey"))
+        shotmap_event = event.get("shotmapEvent")
+        shot_situation = None
+        if isinstance(shotmap_event, dict):
+            shot_situation = cls._clean_text(shotmap_event.get("situation"))
+
+        return any(
+            (
+                goal_description == "Penalty",
+                goal_description_key == "penalty",
+                suffix == "Pen",
+                suffix_key == "penalties_short",
+                shot_situation == "Penalty",
+            )
+        )
+
+    @staticmethod
+    def _translate_var_decision(decision_key: str | None, decision_value: str | None) -> str | None:
+        mapping = {
+            "var_yellow_card_removed": "Tarjeta amarilla cancelada",
+            "var_red_card_removed": "Tarjeta roja anulada",
+        }
+
+        if decision_key and decision_key in mapping:
+            return mapping[decision_key]
+
+        if decision_value:
+            return decision_value
+
+        return None
+
+    @classmethod
+    def _build_var_decision(
+        cls,
+        event: dict[str, Any],
+        clean_event: dict[str, Any],
+        is_cancelled: bool,
+    ) -> tuple[str | None, str | None, str | None]:
+        player_name = cls._clean_text(clean_event.get("player"))
+        var_decision = event.get("VAR") if isinstance(event.get("VAR"), dict) else {}
+        decision_block = (
+            var_decision.get("decision") if isinstance(var_decision.get("decision"), dict) else {}
+        )
+        decision_key = None
+        if isinstance(decision_block.get("key"), list) and decision_block.get("key"):
+            decision_key = cls._clean_text(decision_block["key"][0])
+        decision_value = None
+        if isinstance(decision_block.get("value"), list) and decision_block.get("value"):
+            decision_value = cls._clean_text(decision_block["value"][0])
+
+        decision = cls._clean_text(
+            cls._translate_var_decision(decision_key, decision_value)
+            or event.get("text")
+            or event.get("decision")
+            or event.get("description")
+            or event.get("name")
+        )
+        reason = cls._clean_text(
+            event.get("reason") or event.get("incidentClass") or event.get("varReason")
+        )
+
+        if not decision and is_cancelled:
+            card_type = cls._clean_text(clean_event.get("cardType"))
+            if card_type == "Red":
+                decision = "Tarjeta roja anulada"
+            elif card_type == "Yellow":
+                decision = "Tarjeta amarilla anulada"
+
+        if not decision:
+            decision = "Revisión VAR"
+
+        if reason and reason.casefold() == decision.casefold():
+            reason = None
+
+        return decision, player_name, reason
+
+    @classmethod
+    def _normalize_event_payload(
+        cls,
+        event: dict[str, Any],
+        clean_event: dict[str, Any],
+    ) -> dict[str, Any]:
+        event_type = cls._normalize_event_type(clean_event.get("type") or event.get("type"))
+        kind = "other"
+        side = cls._event_side(event)
+        title: str | None = None
+        subtitle: str | None = None
+        detail: str | None = None
+        is_cancelled = bool(event.get("cancelled") or event.get("isCancelled"))
+
+        if event_type in {"Goal", "PenaltyGoal"}:
+            kind = "goal"
+            title = clean_event.get("player") or next(
+                iter(cls._event_title_candidates(event)),
+                None,
+            )
+            details: list[str] = []
+            if clean_event.get("assist"):
+                details.append(f"Asist. {clean_event['assist']}")
+            if clean_event.get("ownGoal"):
+                details.append("Gol en propia")
+            if clean_event.get("isPenalty") and not clean_event.get("isPenaltyShootout"):
+                details.append("De penalti")
+            if clean_event.get("isPenaltyShootout"):
+                subtitle = "Tanda de penaltis"
+            detail = " · ".join(details) or None
+        elif event_type in {"MissedPenalty", "FailedPenalty"}:
+            kind = "missed_penalty"
+            title = clean_event.get("player") or next(
+                iter(cls._event_title_candidates(event)),
+                None,
+            )
+            detail = "Penalti fallado"
+        elif event_type == "Card":
+            kind = "card"
+            title = clean_event.get("player") or next(
+                iter(cls._event_title_candidates(event)),
+                None,
+            )
+            card_type = clean_event.get("cardType")
+            if card_type == "Red":
+                detail = "Tarjeta roja"
+            elif card_type == "YellowRed":
+                detail = "Doble amarilla"
+            elif card_type == "Yellow":
+                detail = "Tarjeta amarilla"
+            else:
+                detail = "Tarjeta"
+        elif event_type == "Substitution":
+            kind = "substitution"
+            title = clean_event.get("playerIn") or "Cambio"
+            if clean_event.get("playerOut"):
+                detail = f"Sale {clean_event['playerOut']}"
+        elif event_type == "AddedTime":
+            kind = "added_time"
+            side = "neutral"
+            title = clean_event.get("label") or "Tiempo añadido"
+        elif event_type == "Half":
+            kind = "period"
+            side = "neutral"
+            label = clean_event.get("label")
+            title = {
+                "HT": "Descanso",
+                "FT": "Final",
+                "AET": "Final prórroga",
+                "AP": "Final penaltis",
+            }.get(label or "", label or "Parte")
+        elif event_type == "Var":
+            kind = "var"
+            title, subtitle, detail = cls._build_var_decision(
+                event,
+                clean_event,
+                is_cancelled,
+            )
+        else:
+            title = next(iter(cls._event_title_candidates(event)), None) or event_type
+            detail = cls._clean_text(event.get("incidentClass") or event.get("reason"))
+
+        if is_cancelled:
+            if kind == "card":
+                detail = f"{detail or 'Tarjeta'} anulada"
+            elif kind == "goal":
+                detail = f"{detail} · Acción anulada" if detail else "Acción anulada"
+            elif kind == "var":
+                detail = detail
+            else:
+                detail = detail or "Acción anulada"
+
+        return {
+            "kind": kind,
+            "side": side,
+            "title": title,
+            "subtitle": subtitle,
+            "detail": detail,
+            "isCancelled": is_cancelled,
+        }
 
     @classmethod
     def _map_team(cls, team: dict[str, Any], country_code: str) -> TeamInfo:
@@ -355,8 +603,12 @@ class FotmobMapper:
                 home_score = event.get("homeScore")
                 away_score = event.get("awayScore")
 
+            event_type = self._normalize_event_type(event.get("type"))
+            if event_type == "Goal" and self._is_penalty_goal_event(event):
+                event_type = "PenaltyGoal"
+
             clean_event: dict[str, Any] = {
-                "type": event.get("type"),
+                "type": event_type,
                 "minute": event.get("time"),
                 "timeStr": event.get("timeStr"),
                 "isHome": event.get("isHome"),
@@ -364,30 +616,34 @@ class FotmobMapper:
                 "isPenaltyShootout": event.get("isPenaltyShootoutEvent", False),
             }
 
-            event_type = event.get("type")
-            if event_type == "Goal":
+            if event_type in {"Goal", "PenaltyGoal", "MissedPenalty", "FailedPenalty", "Var"}:
                 player = event.get("player", {}) or {}
                 clean_event["player"] = player.get("name")
                 clean_event["playerId"] = player.get("id")
+                if event_type == "Var":
+                    clean_event["cardType"] = self._normalize_card_type(event.get("card"))
+
+            if event_type in {"Goal", "PenaltyGoal"}:
                 clean_event["assist"] = event.get("assistInput")
                 clean_event["ownGoal"] = event.get("ownGoal", False)
-                if event.get("isPenaltyShootoutEvent"):
+                if event.get("isPenaltyShootoutEvent") or event_type == "PenaltyGoal":
                     clean_event["isPenalty"] = True
             elif event_type == "Card":
                 player = event.get("player", {}) or {}
                 clean_event["player"] = player.get("name")
                 clean_event["playerId"] = player.get("id")
-                clean_event["cardType"] = event.get("card")
+                clean_event["cardType"] = self._normalize_card_type(event.get("card"))
             elif event_type == "Substitution":
                 swap = event.get("swap", [])
                 if len(swap) >= 2:
-                    clean_event["playerOut"] = swap[0].get("name")
-                    clean_event["playerIn"] = swap[1].get("name")
-                    clean_event["playerOutId"] = swap[0].get("id")
-                    clean_event["playerInId"] = swap[1].get("id")
+                    clean_event["playerIn"] = swap[0].get("name")
+                    clean_event["playerOut"] = swap[1].get("name")
+                    clean_event["playerInId"] = swap[0].get("id")
+                    clean_event["playerOutId"] = swap[1].get("id")
             elif event_type in {"Half", "AddedTime"}:
                 clean_event["label"] = event.get("halfStrShort") or event.get("minutesAddedStr")
 
+            clean_event.update(self._normalize_event_payload(event, clean_event))
             processed.append(clean_event)
         return processed
 

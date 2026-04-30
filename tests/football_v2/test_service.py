@@ -6,6 +6,9 @@ from app.domains.football_v2.service import FootballV2Service
 
 
 class _FakeRepository:
+    def __init__(self) -> None:
+        self.last_limit: int | None = None
+
     def list_sports(self) -> list[dict]:
         return [{"id": 1, "slug": "football", "name": "Football"}]
 
@@ -23,6 +26,149 @@ class _FakeRepository:
                 },
             }
         ]
+
+    def list_events_for_seasons(
+        self,
+        season_ids: list[int],
+        bucket: str,
+        from_date: str | None = None,
+        to_date: str | None = None,
+        limit: int | None = None,
+    ) -> list[dict]:
+        self.last_limit = limit
+        if bucket == "results":
+            return [
+                {
+                    "id": 2,
+                    "sport_id": 1,
+                    "competition_id": 55,
+                    "competition_season_id": 12,
+                    "start_at": "2026-04-03T20:00:00+00:00",
+                    "status": "finished",
+                },
+                {
+                    "id": 1,
+                    "sport_id": 1,
+                    "competition_id": 42,
+                    "competition_season_id": 11,
+                    "start_at": "2026-04-02T20:00:00+00:00",
+                    "status": "finished",
+                },
+            ]
+
+        return [
+            {
+                "id": 1,
+                "sport_id": 1,
+                "competition_id": 42,
+                "competition_season_id": 11,
+                "start_at": "2026-04-05T20:00:00+00:00",
+                "status": "scheduled",
+            },
+            {
+                "id": 2,
+                "sport_id": 1,
+                "competition_id": 55,
+                "competition_season_id": 12,
+                "start_at": "2026-04-04T20:00:00+00:00",
+                "status": "scheduled",
+            },
+        ]
+
+    def list_football_event_rows(self, event_ids: list[int]) -> list[dict]:
+        return [
+            {
+                "event_id": event_id,
+                "round_key": None,
+                "round_label": None,
+                "leg": None,
+                "home_score": None,
+                "away_score": None,
+                "minute": None,
+                "timeline": [],
+            }
+            for event_id in event_ids
+        ]
+
+    def list_event_participants(self, event_ids: list[int]) -> list[dict]:
+        rows: list[dict] = []
+        for event_id in event_ids:
+            rows.extend(
+                [
+                    {
+                        "event_id": event_id,
+                        "slot_key": "home",
+                        "participant_id": 100 + event_id,
+                        "placeholder_label": None,
+                    },
+                    {
+                        "event_id": event_id,
+                        "slot_key": "away",
+                        "participant_id": 200 + event_id,
+                        "placeholder_label": None,
+                    },
+                ]
+            )
+        return rows
+
+    def list_participants(self, participant_ids: list[int]) -> list[dict]:
+        return [
+            {
+                "id": participant_id,
+                "name": f"Team {participant_id}",
+                "badge_url": None,
+                "code": None,
+                "country_code": "ES",
+            }
+            for participant_id in participant_ids
+        ]
+
+    def list_competitions(self, competition_ids: list[int]) -> list[dict]:
+        base = {
+            42: {
+                "id": 42,
+                "name": "UEFA Champions League",
+                "country_code": None,
+                "provider_competition_id": "42",
+            },
+            55: {
+                "id": 55,
+                "name": "Serie A",
+                "country_code": "IT",
+                "provider_competition_id": "55",
+            },
+        }
+        return [base[item] for item in competition_ids if item in base]
+
+    def list_current_seasons(self, competition_ids: list[int] | None = None) -> list[dict]:
+        rows = [
+            {
+                "id": 11,
+                "competition_id": 42,
+                "season_key": "2025-2026",
+                "season_label": "2025/26",
+                "is_current": True,
+                "format_kind": "league_phase_knockout",
+            },
+            {
+                "id": 12,
+                "competition_id": 55,
+                "season_key": "2025-2026",
+                "season_label": "2025/26",
+                "is_current": True,
+                "format_kind": "league",
+            },
+        ]
+        if competition_ids is None:
+            return rows
+        return [row for row in rows if row["competition_id"] in competition_ids]
+
+    def get_current_season_by_competition(self, competition_id: int) -> dict | None:
+        rows = self.list_current_seasons([competition_id])
+        return rows[0] if rows else None
+
+    def list_seasons(self, season_ids: list[int]) -> list[dict]:
+        return [row for row in self.list_current_seasons() if row["id"] in season_ids]
 
 
 class _StandingsRepository:
@@ -215,6 +361,36 @@ class FootballV2ServiceTests(TestCase):
 
         self.assertEqual(len(competitions), 1)
         self.assertEqual(competitions[0].current_edition.season_key, "2025-2026")
+
+    def test_get_event_feed_orders_competitions_by_temporal_proximity(self) -> None:
+        repository = _FakeRepository()
+        service = FootballV2Service(repository=repository)  # type: ignore[arg-type]
+
+        live_feed = service.get_event_feed(bucket="live")
+        results_feed = service.get_event_feed(bucket="results")
+
+        self.assertEqual([item.name for item in live_feed], ["Serie A", "UEFA Champions League"])
+        self.assertEqual(
+            [item.name for item in results_feed],
+            ["Serie A", "UEFA Champions League"],
+        )
+        self.assertEqual(repository.last_limit, 30)
+
+    def test_get_event_feed_uses_competition_default_limit(self) -> None:
+        repository = _FakeRepository()
+        service = FootballV2Service(repository=repository)  # type: ignore[arg-type]
+
+        service.get_event_feed(bucket="live", competition_id=42)
+
+        self.assertEqual(repository.last_limit, 50)
+
+    def test_get_event_feed_caps_explicit_limit(self) -> None:
+        repository = _FakeRepository()
+        service = FootballV2Service(repository=repository)  # type: ignore[arg-type]
+
+        service.get_event_feed(bucket="results", limit=250)
+
+        self.assertEqual(repository.last_limit, 100)
 
     def test_get_standings_returns_all_groups_when_no_group_filter(self) -> None:
         service = FootballV2Service(repository=_StandingsRepository())  # type: ignore[arg-type]

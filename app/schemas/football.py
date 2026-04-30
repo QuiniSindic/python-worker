@@ -18,6 +18,12 @@ class MatchEventResponse(BaseModel):
     minute: int | str | None = None
     timeStr: str | int | None = None
     isHome: bool | None = None
+    kind: str | None = None
+    side: str | None = None
+    title: str | None = None
+    subtitle: str | None = None
+    detail: str | None = None
+    isCancelled: bool | None = None
     score: dict[str, int | None] | None = None
     isPenaltyShootout: bool | None = None
     player: str | None = None
@@ -38,6 +44,7 @@ class MatchResponse(BaseModel):
     status: str
     result: str
     kickoff: str
+    kickoffIso: str | None = None
     minute: str | None = None
     homeId: int
     awayId: int
@@ -54,6 +61,7 @@ class MatchResponse(BaseModel):
 class BracketLegResponse(BaseModel):
     eventId: int
     kickoff: str
+    kickoffIso: str | None = None
     status: str
     minute: str | None = None
     result: str
@@ -179,6 +187,7 @@ class PredictionFeedItemResponse(BaseModel):
     username: str
     matchId: int
     kickoff: str
+    kickoffIso: str | None = None
     matchStatus: str
     homeTeam: str
     awayTeam: str

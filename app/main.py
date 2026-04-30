@@ -30,3 +30,12 @@ def root():
         "active": ["/api/v2"],
         "legacy": [],
     }
+
+
+@app.get("/health")
+def health():
+    return {
+        "status": "ok",
+        "service": settings.PROJECT_NAME,
+        "active": ["/api/v2"],
+    }
