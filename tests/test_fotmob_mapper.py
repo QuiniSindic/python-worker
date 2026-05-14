@@ -291,6 +291,61 @@ class FotmobMapperTests(unittest.TestCase):
             ["Grupo A", "Mejores terceros"],
         )
 
+    def test_map_standings_payload_detects_unnamed_best_thirds_after_real_groups(self) -> None:
+        tables = []
+        for index in range(12):
+            tables.append(
+                {
+                    "name": f"Group {index + 1}",
+                    "table": {
+                        "all": [
+                            {
+                                "idx": 1,
+                                "id": 100 + index,
+                                "name": f"Team {index + 1}",
+                                "shortName": f"T{index + 1}",
+                                "played": 3,
+                                "wins": 2,
+                                "draws": 1,
+                                "losses": 0,
+                                "pts": 7,
+                                "scoresStr": "5-1",
+                                "goalConDiff": 4,
+                            }
+                        ]
+                    },
+                }
+            )
+        tables.append(
+            {
+                "table": {
+                    "all": [
+                        {
+                            "idx": 1,
+                            "id": 300,
+                            "name": "Third Place Team",
+                            "shortName": "TPT",
+                            "played": 3,
+                            "wins": 1,
+                            "draws": 1,
+                            "losses": 1,
+                            "pts": 4,
+                            "scoresStr": "3-3",
+                            "goalConDiff": 0,
+                        }
+                    ]
+                }
+            }
+        )
+        payload = [{"data": {"tables": tables}}]
+
+        standings = self.mapper.map_standings_payload(payload, league_id=77)
+
+        self.assertIsNotNone(standings)
+        self.assertEqual(standings["groups"][-2]["id"], "group_l")
+        self.assertEqual(standings["groups"][-1]["id"], "best_third_placed")
+        self.assertEqual(standings["groups"][-1]["name"], "Mejores terceros")
+
     def test_map_match_details_payload_normalizes_events(self) -> None:
         payload = {
             "content": {

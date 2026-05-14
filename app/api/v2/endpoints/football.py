@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, require_internal_access
 from app.domains.football_v2 import FootballV2Service
 from app.schemas.auth import AuthenticatedUser
 from app.schemas.catalog import CompetitionEditionLite
@@ -16,6 +16,9 @@ from app.schemas.football import (
     PredictionRowResponse,
     PredictionUpdatePayload,
     PredictionUpsertPayload,
+    TournamentPredictionOptionsResponse,
+    TournamentPredictionPayload,
+    TournamentPredictionResponse,
 )
 
 router = APIRouter()
@@ -103,6 +106,46 @@ def get_current_season(competition_id: int) -> CompetitionEditionLite:
 @router.get("/seasons/{season_id}/overview", response_model=CompetitionStructureResponse)
 def get_season_overview(season_id: int) -> CompetitionStructureResponse:
     return service.get_structure(season_id)
+
+
+@router.get(
+    "/seasons/{season_id}/tournament-prediction/options",
+    response_model=TournamentPredictionOptionsResponse,
+)
+def get_tournament_prediction_options(season_id: int) -> TournamentPredictionOptionsResponse:
+    return service.get_tournament_prediction_options(season_id)
+
+
+@router.get(
+    "/seasons/{season_id}/tournament-prediction",
+    response_model=TournamentPredictionResponse,
+)
+def get_tournament_prediction(
+    season_id: int,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> TournamentPredictionResponse:
+    return service.get_tournament_prediction(season_id, user)
+
+
+@router.put(
+    "/seasons/{season_id}/tournament-prediction",
+    response_model=TournamentPredictionResponse,
+)
+def save_tournament_prediction(
+    season_id: int,
+    payload: TournamentPredictionPayload,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> TournamentPredictionResponse:
+    return service.save_tournament_prediction(season_id, payload, user)
+
+
+@router.post(
+    "/seasons/{season_id}/tournament-prediction/score",
+    response_model=list[TournamentPredictionResponse],
+    dependencies=[Depends(require_internal_access)],
+)
+def score_tournament_predictions(season_id: int) -> list[TournamentPredictionResponse]:
+    return service.score_tournament_predictions(season_id)
 
 
 @router.get("/seasons/{season_id}/events", response_model=list[MatchResponse])

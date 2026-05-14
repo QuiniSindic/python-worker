@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 class FotmobMapper:
     _BEST_THIRD_PATTERN = re.compile(r"\b(?:3rd|third|tercer(?:os?)?)\b", re.IGNORECASE)
+    _BEST_THIRD_COMPETITION_IDS = {44, 45, 50, 77, 78}
 
     @staticmethod
     def _group_letter(index: int) -> str:
@@ -49,6 +50,37 @@ class FotmobMapper:
             return f"group_{letter.lower()}", f"Grupo {letter}"
 
         return "overall", "Tabla general"
+
+    @classmethod
+    def _is_best_third_table(
+        cls,
+        table_group: dict[str, Any],
+        explicit_name: Any,
+        index: int,
+        total_tables: int,
+        league_id: int,
+    ) -> bool:
+        name_candidates = [
+            explicit_name,
+            table_group.get("label"),
+            table_group.get("description"),
+            table_group.get("subtitle"),
+        ]
+        if any(
+            cls._BEST_THIRD_PATTERN.search(str(candidate or "").lower())
+            for candidate in name_candidates
+        ):
+            return True
+
+        # FotMob sometimes omits the label for the "best third-placed" summary table.
+        # In supported groups+knockout competitions that table arrives after the real groups.
+        has_explicit_name = isinstance(explicit_name, str) and explicit_name.strip()
+        return (
+            not has_explicit_name
+            and league_id in cls._BEST_THIRD_COMPETITION_IDS
+            and total_tables > 2
+            and index == total_tables - 1
+        )
 
     @staticmethod
     def _extract_round(match_data: dict[str, Any]) -> str | None:
@@ -499,11 +531,17 @@ class FotmobMapper:
                 ]
                 if not rows:
                     continue
-                raw_name = (
+                explicit_name = (
                     table_group.get("name")
                     or table_group.get("groupName")
                     or table_group.get("title")
-                    or f"Grupo {index + 1}"
+                )
+                raw_name = (
+                    "Best third-placed teams"
+                    if self._is_best_third_table(
+                        table_group, explicit_name, index, total_tables, league_id
+                    )
+                    else explicit_name or f"Grupo {index + 1}"
                 )
                 group_id, group_name = self._normalize_group_identity(
                     str(raw_name), index, total_tables

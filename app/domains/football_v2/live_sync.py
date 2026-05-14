@@ -51,6 +51,8 @@ def _recoverable_live_dates(
     *,
     now: datetime,
 ) -> list[str]:
+    if not hasattr(repository, "list_recoverable_live_events"):
+        return []
     stale_live_events = repository.list_recoverable_live_events(
         "fotmob",
         started_after=(now - timedelta(days=RECOVERY_LOOKBACK_DAYS)).isoformat(),

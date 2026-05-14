@@ -234,6 +234,92 @@ class _FakeFootballService:
             ],
         }
 
+    def get_tournament_prediction_options(self, season_id: int) -> dict:
+        return {
+            "season": _edition(),
+            "groups": [
+                {
+                    "id": "group_a",
+                    "name": "Grupo A",
+                    "order": 0,
+                    "teams": [_team(1, "Barcelona"), _team(2, "Real Madrid")],
+                }
+            ],
+            "bracket": self.get_bracket(season_id),
+            "awardCandidates": [
+                {
+                    "id": 101,
+                    "name": "Player One",
+                    "teamId": 1,
+                    "teamName": "Barcelona",
+                    "badge": None,
+                    "country": "ES",
+                }
+            ],
+            "rules": {
+                "groupPosition": 1,
+                "groupPerfectBonus": 3,
+                "qualifiedThird": 2,
+                "knockoutByRound": {"round_of_16": 10, "final": 25},
+                "champion": 0,
+                "awards": {"mvp": 0, "bestGoalkeeper": 0, "topScorer": 0},
+            },
+            "locks": {
+                "groupsLocked": False,
+                "awardsLocked": False,
+                "championLocked": False,
+                "lockedEventIds": [],
+            },
+        }
+
+    def get_tournament_prediction(self, season_id: int, user: AuthenticatedUser) -> dict:
+        return {
+            "id": None,
+            "user_id": user.id,
+            "competition_id": 42,
+            "edition_id": season_id,
+            "sport_id": 1,
+            "status": "open",
+            "payload": {
+                "groupPredictions": [],
+                "qualifiedThirdParticipantIds": [],
+                "knockoutPredictions": [],
+                "awards": {},
+                "championParticipantId": None,
+            },
+            "points": None,
+            "pointsBreakdown": {},
+            "created_at": None,
+            "updated_at": None,
+            "options": self.get_tournament_prediction_options(season_id),
+        }
+
+    def save_tournament_prediction(
+        self, season_id: int, payload: object, user: AuthenticatedUser
+    ) -> dict:
+        return {
+            "id": "tournament-pred-1",
+            "user_id": user.id,
+            "competition_id": 42,
+            "edition_id": season_id,
+            "sport_id": 1,
+            "status": "open",
+            "payload": payload.model_dump(),
+            "points": None,
+            "pointsBreakdown": {},
+            "created_at": "2026-04-03T10:00:00+00:00",
+            "updated_at": "2026-04-03T10:00:00+00:00",
+            "options": self.get_tournament_prediction_options(season_id),
+        }
+
+    def score_tournament_predictions(self, season_id: int) -> list[dict]:
+        return [
+            self.get_tournament_prediction(
+                season_id,
+                AuthenticatedUser(id="user-1", email=None, username="elian"),
+            )
+        ]
+
     def get_bracket(self, season_id: int) -> list[dict]:
         return [
             {
@@ -508,6 +594,40 @@ class ApiV2Tests(TestCase):
         self.assertEqual(prediction_me_response.json()["user_id"], "user-1")
         self.assertEqual(prediction_save_response.json()["home_score"], 3)
         self.assertEqual(prediction_update_response.json()["away_score"], 1)
+
+    def test_tournament_prediction_endpoints_work(self) -> None:
+        options_response = self.client.get(
+            "/api/v2/football/seasons/10/tournament-prediction/options"
+        )
+        me_response = self.client.get("/api/v2/football/seasons/10/tournament-prediction")
+        save_response = self.client.put(
+            "/api/v2/football/seasons/10/tournament-prediction",
+            json={
+                "groupPredictions": [{"groupId": "group_a", "orderedParticipantIds": [1, 2]}],
+                "qualifiedThirdParticipantIds": [],
+                "knockoutPredictions": [
+                    {
+                        "eventId": 501,
+                        "homeScore": 2,
+                        "awayScore": 1,
+                        "winnerParticipantId": 1,
+                        "wonOnPenalties": False,
+                    }
+                ],
+                "awards": {
+                    "mvpParticipantId": 101,
+                    "bestGoalkeeperParticipantId": None,
+                    "topScorerParticipantId": None,
+                },
+                "championParticipantId": 1,
+            },
+        )
+
+        self.assertEqual(options_response.status_code, 200)
+        self.assertEqual(me_response.status_code, 200)
+        self.assertEqual(save_response.status_code, 200)
+        self.assertEqual(options_response.json()["groups"][0]["id"], "group_a")
+        self.assertEqual(save_response.json()["id"], "tournament-pred-1")
 
     def test_users_and_leaderboard_endpoints_use_v2_contracts(self) -> None:
         me_response = self.client.get("/api/v2/users/me")

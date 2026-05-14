@@ -215,3 +215,104 @@ class PredictionUpsertPayload(BaseModel):
 class PredictionUpdatePayload(BaseModel):
     home_score: int
     away_score: int
+
+
+class TournamentTeamOption(BaseModel):
+    id: int
+    name: str
+    badge: str | None = None
+    country: str | None = None
+
+
+class TournamentGroupOption(BaseModel):
+    id: str
+    name: str
+    order: int
+    teams: list[TournamentTeamOption] = Field(default_factory=list)
+
+
+class TournamentAwardCandidate(BaseModel):
+    id: int
+    name: str
+    teamId: int | None = None
+    teamName: str | None = None
+    badge: str | None = None
+    country: str | None = None
+
+
+class TournamentScoringRules(BaseModel):
+    groupPosition: int = 1
+    groupPerfectBonus: int = 3
+    qualifiedThird: int = 2
+    knockoutByRound: dict[str, int] = Field(
+        default_factory=lambda: {
+            "round_of_32": 5,
+            "round_of_16": 10,
+            "quarterfinals": 12,
+            "semifinals": 15,
+            "third_place": 20,
+            "final": 25,
+        }
+    )
+    champion: int = 0
+    awards: dict[str, int] = Field(
+        default_factory=lambda: {"mvp": 0, "bestGoalkeeper": 0, "topScorer": 0}
+    )
+
+
+class TournamentLocks(BaseModel):
+    groupsLocked: bool = False
+    awardsLocked: bool = False
+    championLocked: bool = False
+    lockedEventIds: list[int] = Field(default_factory=list)
+
+
+class TournamentGroupPrediction(BaseModel):
+    groupId: str
+    orderedParticipantIds: list[int] = Field(default_factory=list)
+
+
+class TournamentKnockoutPrediction(BaseModel):
+    eventId: int
+    homeScore: int
+    awayScore: int
+    winnerParticipantId: int
+    wonOnPenalties: bool = False
+
+
+class TournamentAwardsPrediction(BaseModel):
+    mvpParticipantId: int | None = None
+    bestGoalkeeperParticipantId: int | None = None
+    topScorerParticipantId: int | None = None
+
+
+class TournamentPredictionPayload(BaseModel):
+    groupPredictions: list[TournamentGroupPrediction] = Field(default_factory=list)
+    qualifiedThirdParticipantIds: list[int] = Field(default_factory=list)
+    knockoutPredictions: list[TournamentKnockoutPrediction] = Field(default_factory=list)
+    awards: TournamentAwardsPrediction = Field(default_factory=TournamentAwardsPrediction)
+    championParticipantId: int | None = None
+
+
+class TournamentPredictionOptionsResponse(BaseModel):
+    season: CompetitionEditionLite
+    groups: list[TournamentGroupOption] = Field(default_factory=list)
+    bracket: list[BracketRoundResponse] = Field(default_factory=list)
+    awardCandidates: list[TournamentAwardCandidate] = Field(default_factory=list)
+    rules: TournamentScoringRules = Field(default_factory=TournamentScoringRules)
+    locks: TournamentLocks = Field(default_factory=TournamentLocks)
+
+
+class TournamentPredictionResponse(BaseModel):
+    id: str | None = None
+    user_id: str
+    competition_id: int
+    edition_id: int
+    sport_id: int
+    status: str
+    payload: TournamentPredictionPayload
+    points: int | None = None
+    pointsBreakdown: dict[str, int] = Field(default_factory=dict)
+    created_at: str | None = None
+    updated_at: str | None = None
+    options: TournamentPredictionOptionsResponse

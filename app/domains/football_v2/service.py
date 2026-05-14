@@ -26,6 +26,14 @@ from app.schemas.football import (
     StandingsGroupResponse,
     TeamInfoResponse,
     TeamStandingResponse,
+    TournamentAwardCandidate,
+    TournamentGroupOption,
+    TournamentLocks,
+    TournamentPredictionOptionsResponse,
+    TournamentPredictionPayload,
+    TournamentPredictionResponse,
+    TournamentScoringRules,
+    TournamentTeamOption,
 )
 from app.schemas.leaderboard import LeaderboardEntry, LeaderboardFilterOptions
 
@@ -312,6 +320,73 @@ class FootballV2Service:
             ],
         )
 
+    def get_tournament_prediction_options(
+        self, season_id: int
+    ) -> TournamentPredictionOptionsResponse:
+        season = self.repository.get_season(season_id)
+        if not season:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Season not found")
+        return self._build_tournament_options(season)
+
+    def get_tournament_prediction(
+        self, season_id: int, user: AuthenticatedUser
+    ) -> TournamentPredictionResponse:
+        season = self.repository.get_season(season_id)
+        if not season:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Season not found")
+        row = self.repository.get_tournament_prediction(season_id, user.id)
+        options = self._build_tournament_options(season)
+        if row is None:
+            return TournamentPredictionResponse(
+                user_id=user.id,
+                competition_id=season["competition_id"],
+                edition_id=season_id,
+                sport_id=self._season_sport_id(season),
+                status="open",
+                payload=TournamentPredictionPayload(),
+                options=options,
+            )
+        return self._map_tournament_prediction_row(row, options)
+
+    def save_tournament_prediction(
+        self,
+        season_id: int,
+        payload: TournamentPredictionPayload,
+        user: AuthenticatedUser,
+    ) -> TournamentPredictionResponse:
+        season = self.repository.get_season(season_id)
+        if not season:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Season not found")
+        existing = self.repository.get_tournament_prediction(season_id, user.id)
+        options = self._build_tournament_options(season)
+        self._validate_tournament_locks(payload, existing, options.locks)
+        self._validate_tournament_payload(payload, options)
+        row = self.repository.upsert_tournament_prediction(
+            user_id=user.id,
+            sport_id=self._season_sport_id(season),
+            competition_id=season["competition_id"],
+            season_id=season_id,
+            payload=payload.model_dump(),
+            prediction_id=existing["id"] if existing else None,
+        )
+        return self._map_tournament_prediction_row(row, options)
+
+    def score_tournament_predictions(self, season_id: int) -> list[TournamentPredictionResponse]:
+        season = self.repository.get_season(season_id)
+        if not season:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Season not found")
+        options = self._build_tournament_options(season)
+        rows = self.repository.list_tournament_predictions([season_id])
+        scored: list[TournamentPredictionResponse] = []
+        for row in rows:
+            payload = TournamentPredictionPayload(**(row.get("payload") or {}))
+            points, breakdown = self._score_tournament_payload(payload, options, season_id)
+            updated = self.repository.update_tournament_prediction_score(
+                row["id"], points=points, points_breakdown=breakdown
+            )
+            scored.append(self._map_tournament_prediction_row(updated or row, options))
+        return scored
+
     def get_event_predictions(self, event_id: int) -> list[PredictionRowResponse]:
         return [
             self._map_prediction_row(row)
@@ -449,8 +524,10 @@ class FootballV2Service:
         prediction_rows = (
             self.repository.supabase.table("predictions").select("*").execute().data or []
         )
+        tournament_rows = self.repository.list_tournament_predictions()
         if scope == "sport" and filter_id is not None:
             prediction_rows = [row for row in prediction_rows if row["sport_id"] == filter_id]
+            tournament_rows = [row for row in tournament_rows if row["sport_id"] == filter_id]
         elif scope == "competition" and filter_id is not None:
             season = self.repository.get_current_season_by_competition(filter_id)
             prediction_rows = (
@@ -458,14 +535,18 @@ class FootballV2Service:
                 if season
                 else []
             )
-        profiles = {
-            row["id"]: row
-            for row in self.repository.get_profiles(
-                sorted({row["user_id"] for row in prediction_rows})
+            tournament_rows = (
+                [row for row in tournament_rows if row["competition_season_id"] == season["id"]]
+                if season
+                else []
             )
-        }
+        user_ids = sorted(
+            {row["user_id"] for row in prediction_rows}
+            | {row["user_id"] for row in tournament_rows}
+        )
+        profiles = {row["id"]: row for row in self.repository.get_profiles(user_ids)}
         grouped: dict[str, dict[str, Any]] = {}
-        for row in prediction_rows:
+        for row in [*prediction_rows, *tournament_rows]:
             entry = grouped.setdefault(
                 row["user_id"],
                 {
@@ -492,6 +573,327 @@ class FootballV2Service:
         sports = self.get_sports()
         competitions = self.get_competitions(sports[0].id) if sports else []
         return LeaderboardFilterOptions(sports=sports, competitions=competitions)
+
+    def _build_tournament_options(self, season: dict) -> TournamentPredictionOptionsResponse:
+        groups = self._get_tournament_group_options(season)
+        bracket = self.get_bracket(season["id"])
+        return TournamentPredictionOptionsResponse(
+            season=self._map_edition(season),
+            groups=groups,
+            bracket=bracket,
+            awardCandidates=self._get_award_candidates(season["id"]),
+            rules=self._get_tournament_rules(season["id"]),
+            locks=self._get_tournament_locks(season["id"]),
+        )
+
+    def _get_tournament_group_options(self, season: dict) -> list[TournamentGroupOption]:
+        phases = self.repository.list_phases_for_season(season["id"])
+        standings_phase = next((row for row in phases if row.get("is_standings_phase")), None)
+        if standings_phase is None:
+            return []
+        groups = self.repository.list_groups_for_phase_ids([standings_phase["id"]])
+        rows = self.repository.list_standings_rows(season["id"], standings_phase["id"])
+        participants = {
+            row["id"]: row
+            for row in self.repository.list_participants([row["participant_id"] for row in rows])
+        }
+        rows_by_group: dict[int, list[dict]] = defaultdict(list)
+        for row in rows:
+            rows_by_group[row["phase_group_id"]].append(row)
+        options: list[TournamentGroupOption] = []
+        for group in groups:
+            if group["key"] == "best_third_placed":
+                continue
+            group_rows = sorted(
+                rows_by_group.get(group["id"], []), key=lambda item: item["position"]
+            )
+            options.append(
+                TournamentGroupOption(
+                    id=group["key"],
+                    name=group["name"],
+                    order=group["order_index"],
+                    teams=[
+                        TournamentTeamOption(
+                            id=item["participant_id"],
+                            name=participants.get(item["participant_id"], {}).get("name", "Equipo"),
+                            badge=participants.get(item["participant_id"], {}).get("badge_url"),
+                            country=participants.get(item["participant_id"], {}).get(
+                                "country_code"
+                            ),
+                        )
+                        for item in group_rows
+                    ],
+                )
+            )
+        return options
+
+    def _get_award_candidates(self, season_id: int) -> list[TournamentAwardCandidate]:
+        season_participants = self.repository.list_season_participants(season_id)
+        team_ids = [row["participant_id"] for row in season_participants]
+        teams = {row["id"]: row for row in self.repository.list_participants(team_ids)}
+        memberships = self.repository.list_participant_members(team_ids)
+        player_ids = [
+            row["member_participant_id"]
+            for row in memberships
+            if row.get("member_participant_id") is not None
+        ]
+        players = {
+            row["id"]: row
+            for row in self.repository.list_participants(player_ids)
+            if row.get("kind") == "player"
+        }
+        candidates: list[TournamentAwardCandidate] = []
+        for row in memberships:
+            player = players.get(row.get("member_participant_id"))
+            if not player:
+                continue
+            team = teams.get(row.get("parent_participant_id"), {})
+            candidates.append(
+                TournamentAwardCandidate(
+                    id=player["id"],
+                    name=player["name"],
+                    teamId=team.get("id"),
+                    teamName=team.get("name"),
+                    badge=player.get("badge_url"),
+                    country=player.get("country_code") or team.get("country_code"),
+                )
+            )
+        return sorted(candidates, key=lambda item: (item.teamName or "", item.name))
+
+    def _get_tournament_rules(self, season_id: int) -> TournamentScoringRules:
+        row = self.repository.get_tournament_prediction_rules(season_id)
+        return TournamentScoringRules(**(row.get("rules") if row else {}))
+
+    def _get_tournament_locks(self, season_id: int) -> TournamentLocks:
+        events = self.repository.list_events_for_seasons([season_id], "live")
+        events.extend(self.repository.list_events_for_seasons([season_id], "results"))
+        now = datetime.now(UTC)
+        starts = [_sortable_kickoff(row.get("start_at")) for row in events]
+        tournament_started = bool(starts) and min(starts) <= now
+        locked_event_ids = [
+            row["id"]
+            for row in events
+            if row.get("status") != "scheduled" or _sortable_kickoff(row.get("start_at")) <= now
+        ]
+        return TournamentLocks(
+            groupsLocked=tournament_started,
+            awardsLocked=tournament_started,
+            championLocked=tournament_started,
+            lockedEventIds=locked_event_ids,
+        )
+
+    def _validate_tournament_locks(
+        self,
+        payload: TournamentPredictionPayload,
+        existing: dict | None,
+        locks: TournamentLocks,
+    ) -> None:
+        old = TournamentPredictionPayload(**(existing.get("payload") or {})) if existing else None
+        if locks.groupsLocked and (
+            old is None
+            or payload.groupPredictions != old.groupPredictions
+            or payload.qualifiedThirdParticipantIds != old.qualifiedThirdParticipantIds
+        ):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Groups are locked")
+        if locks.awardsLocked and (old is None or payload.awards != old.awards):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Awards are locked")
+        if locks.championLocked and (
+            old is None or payload.championParticipantId != old.championParticipantId
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Champion is locked"
+            )
+        old_knockouts = {item.eventId: item for item in old.knockoutPredictions} if old else {}
+        for item in payload.knockoutPredictions:
+            if item.eventId in locks.lockedEventIds and old_knockouts.get(item.eventId) != item:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Event {item.eventId} is locked",
+                )
+
+    def _validate_tournament_payload(
+        self, payload: TournamentPredictionPayload, options: TournamentPredictionOptionsResponse
+    ) -> None:
+        groups = {group.id: group for group in options.groups}
+        for prediction in payload.groupPredictions:
+            group = groups.get(prediction.groupId)
+            if not group:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid group")
+            expected_ids = {team.id for team in group.teams}
+            provided_ids = prediction.orderedParticipantIds
+            if set(provided_ids) != expected_ids or len(provided_ids) != len(expected_ids):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid teams for {prediction.groupId}",
+                )
+        third_candidates = {
+            prediction.orderedParticipantIds[2]
+            for prediction in payload.groupPredictions
+            if len(prediction.orderedParticipantIds) >= 3
+        }
+        if not set(payload.qualifiedThirdParticipantIds).issubset(third_candidates):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Qualified thirds must be predicted third-place teams",
+            )
+        event_sides = self._tournament_event_sides(options.bracket)
+        for prediction in payload.knockoutPredictions:
+            sides = event_sides.get(prediction.eventId)
+            if not sides:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid knockout event"
+                )
+            if prediction.homeScore < 0 or prediction.awayScore < 0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail="Scores must be positive"
+                )
+            if prediction.winnerParticipantId not in sides:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid knockout winner"
+                )
+        season_team_ids = {team.id for group in options.groups for team in group.teams}
+        if payload.championParticipantId and payload.championParticipantId not in season_team_ids:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid champion")
+        candidate_ids = {candidate.id for candidate in options.awardCandidates}
+        award_ids = [
+            payload.awards.mvpParticipantId,
+            payload.awards.bestGoalkeeperParticipantId,
+            payload.awards.topScorerParticipantId,
+        ]
+        if candidate_ids and any(
+            item is not None and item not in candidate_ids for item in award_ids
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid award candidate"
+            )
+
+    def _score_tournament_payload(
+        self,
+        payload: TournamentPredictionPayload,
+        options: TournamentPredictionOptionsResponse,
+        season_id: int,
+    ) -> tuple[int, dict[str, int]]:
+        rules = options.rules
+        breakdown = {"groups": 0, "qualifiedThirds": 0, "knockout": 0, "champion": 0, "awards": 0}
+        actual_groups = {
+            group.id: [team.id for team in group.teams]
+            for group in self._get_tournament_group_options({"id": season_id})
+        }
+        for prediction in payload.groupPredictions:
+            actual_order = actual_groups.get(prediction.groupId, [])
+            if not actual_order:
+                continue
+            hits = sum(
+                1
+                for index, participant_id in enumerate(prediction.orderedParticipantIds)
+                if index < len(actual_order) and actual_order[index] == participant_id
+            )
+            breakdown["groups"] += hits * rules.groupPosition
+            if prediction.orderedParticipantIds == actual_order:
+                breakdown["groups"] += rules.groupPerfectBonus
+        actual_thirds = self._actual_qualified_thirds(season_id)
+        breakdown["qualifiedThirds"] = (
+            len(set(payload.qualifiedThirdParticipantIds) & actual_thirds) * rules.qualifiedThird
+        )
+        winners = self._tournament_event_winners(options.bracket)
+        round_by_event = self._tournament_event_rounds(options.bracket)
+        for prediction in payload.knockoutPredictions:
+            if winners.get(prediction.eventId) == prediction.winnerParticipantId:
+                breakdown["knockout"] += rules.knockoutByRound.get(
+                    round_by_event.get(prediction.eventId, ""), 0
+                )
+        results = self.repository.get_tournament_results(season_id) or {}
+        champion_id = results.get("champion_participant_id") or self._final_winner(options.bracket)
+        if champion_id and payload.championParticipantId == champion_id:
+            breakdown["champion"] += rules.champion
+        award_rules = rules.awards
+        if payload.awards.mvpParticipantId == results.get("mvp_participant_id"):
+            breakdown["awards"] += award_rules.get("mvp", 0)
+        if payload.awards.bestGoalkeeperParticipantId == results.get(
+            "best_goalkeeper_participant_id"
+        ):
+            breakdown["awards"] += award_rules.get("bestGoalkeeper", 0)
+        if payload.awards.topScorerParticipantId == results.get("top_scorer_participant_id"):
+            breakdown["awards"] += award_rules.get("topScorer", 0)
+        return sum(breakdown.values()), breakdown
+
+    def _actual_qualified_thirds(self, season_id: int) -> set[int]:
+        phases = self.repository.list_phases_for_season(season_id)
+        standings_phase = next((row for row in phases if row.get("is_standings_phase")), None)
+        if standings_phase is None:
+            return set()
+        groups = self.repository.list_groups_for_phase_ids([standings_phase["id"]])
+        third_group = next((row for row in groups if row["key"] == "best_third_placed"), None)
+        if third_group is None:
+            return set()
+        return {
+            row["participant_id"]
+            for row in self.repository.list_standings_rows(
+                season_id, standings_phase["id"], third_group["id"]
+            )
+        }
+
+    def _tournament_event_sides(self, bracket: list[BracketRoundResponse]) -> dict[int, set[int]]:
+        sides: dict[int, set[int]] = {}
+        for round_item in bracket:
+            for tie in round_item.ties:
+                for leg in tie.legs:
+                    ids = {leg.homeTeam.id, leg.awayTeam.id} - {0}
+                    if ids:
+                        sides[leg.eventId] = ids
+        return sides
+
+    def _tournament_event_winners(self, bracket: list[BracketRoundResponse]) -> dict[int, int]:
+        winners: dict[int, int] = {}
+        for round_item in bracket:
+            for tie in round_item.ties:
+                if tie.winnerParticipantId:
+                    for leg in tie.legs:
+                        winners[leg.eventId] = tie.winnerParticipantId
+        return winners
+
+    def _tournament_event_rounds(self, bracket: list[BracketRoundResponse]) -> dict[int, str]:
+        rounds: dict[int, str] = {}
+        for round_item in bracket:
+            for tie in round_item.ties:
+                for leg in tie.legs:
+                    rounds[leg.eventId] = round_item.id
+        return rounds
+
+    def _final_winner(self, bracket: list[BracketRoundResponse]) -> int | None:
+        final_round = next((round_item for round_item in bracket if round_item.id == "final"), None)
+        if not final_round:
+            return None
+        for tie in final_round.ties:
+            if tie.winnerParticipantId:
+                return tie.winnerParticipantId
+        return None
+
+    def _season_sport_id(self, season: dict) -> int:
+        competition = self.repository.get_competition(season["competition_id"])
+        if competition is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Competition not found"
+            )
+        return competition["sport_id"]
+
+    def _map_tournament_prediction_row(
+        self, row: dict, options: TournamentPredictionOptionsResponse
+    ) -> TournamentPredictionResponse:
+        return TournamentPredictionResponse(
+            id=row.get("id"),
+            user_id=row["user_id"],
+            competition_id=row["competition_id"],
+            edition_id=row["competition_season_id"],
+            sport_id=row["sport_id"],
+            status=row["status"],
+            payload=TournamentPredictionPayload(**(row.get("payload") or {})),
+            points=row.get("points"),
+            pointsBreakdown=row.get("points_breakdown") or {},
+            created_at=row.get("created_at"),
+            updated_at=row.get("updated_at"),
+            options=options,
+        )
 
     def _resolve_feed_season_ids(self, competition_id: int | None) -> list[int]:
         if competition_id is not None:

@@ -297,6 +297,131 @@ class FootballV2Repository:
             query = query.eq("phase_group_id", group_id)
         return query.order("position").execute().data or []
 
+    def list_season_participants(self, season_id: int) -> list[dict]:
+        return (
+            self.supabase.table("competition_season_participants")
+            .select("*")
+            .eq("competition_season_id", season_id)
+            .execute()
+            .data
+            or []
+        )
+
+    def list_participant_members(self, parent_participant_ids: list[int]) -> list[dict]:
+        if not parent_participant_ids:
+            return []
+        rows: list[dict] = []
+        for chunk in _chunked(parent_participant_ids):
+            rows.extend(
+                self.supabase.table("participant_members")
+                .select("*")
+                .in_("parent_participant_id", chunk)
+                .order("order_index")
+                .execute()
+                .data
+                or []
+            )
+        return rows
+
+    def get_tournament_prediction(self, season_id: int, user_id: str) -> dict | None:
+        rows = (
+            self.supabase.table("football_tournament_predictions")
+            .select("*")
+            .eq("competition_season_id", season_id)
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        return rows[0] if rows else None
+
+    def list_tournament_predictions(self, season_ids: list[int] | None = None) -> list[dict]:
+        query = self.supabase.table("football_tournament_predictions").select("*")
+        if season_ids:
+            query = query.in_("competition_season_id", season_ids)
+        return query.execute().data or []
+
+    def upsert_tournament_prediction(
+        self,
+        *,
+        user_id: str,
+        sport_id: int,
+        competition_id: int,
+        season_id: int,
+        payload: dict[str, Any],
+        prediction_id: str | None = None,
+    ) -> dict:
+        row = {
+            "user_id": user_id,
+            "sport_id": sport_id,
+            "competition_id": competition_id,
+            "competition_season_id": season_id,
+            "status": "open",
+            "payload": payload,
+            "updated_at": _utc_now_iso(),
+        }
+        if prediction_id:
+            row["id"] = prediction_id
+        rows = (
+            self.supabase.table("football_tournament_predictions")
+            .upsert(row, on_conflict="user_id,competition_season_id")
+            .execute()
+            .data
+            or []
+        )
+        return rows[0]
+
+    def update_tournament_prediction_score(
+        self,
+        prediction_id: str,
+        *,
+        points: int,
+        points_breakdown: dict[str, int],
+        status: str = "scored",
+    ) -> dict:
+        rows = (
+            self.supabase.table("football_tournament_predictions")
+            .update(
+                {
+                    "points": points,
+                    "points_breakdown": points_breakdown,
+                    "status": status,
+                    "scored_at": _utc_now_iso(),
+                    "updated_at": _utc_now_iso(),
+                }
+            )
+            .eq("id", prediction_id)
+            .execute()
+            .data
+            or []
+        )
+        return rows[0] if rows else {}
+
+    def get_tournament_prediction_rules(self, season_id: int) -> dict | None:
+        rows = (
+            self.supabase.table("football_tournament_prediction_rules")
+            .select("*")
+            .eq("competition_season_id", season_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        return rows[0] if rows else None
+
+    def get_tournament_results(self, season_id: int) -> dict | None:
+        rows = (
+            self.supabase.table("football_tournament_results")
+            .select("*")
+            .eq("competition_season_id", season_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        return rows[0] if rows else None
+
     def list_predictions_for_event(self, event_id: int) -> list[dict]:
         prediction_rows = (
             self.supabase.table("predictions")

@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     SUPABASE_KEY: str
     SUPABASE_SERVICE_ROLE_KEY: str
     INTERNAL_API_KEY: str | None = None
-    FRONTEND_ORIGINS: str = "http://localhost:3000"
+    FRONTEND_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
