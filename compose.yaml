@@ -22,6 +22,7 @@ services:
     restart: unless-stopped
     networks:
       - backend
+      - outbound
 
   nginx:
     build:
@@ -74,3 +75,4 @@ networks:
   frontend:
   backend:
     internal: true
+  outbound:

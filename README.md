@@ -205,7 +205,8 @@ Si haces redeploy sobre una base nueva o acabas de cambiar el schema:
 
 El despliegue Docker publica solamente Nginx en los puertos `80` y `443`. La API
 escucha en `8000` dentro de la red privada de Compose y no queda expuesta directamente.
-Certbot obtiene y renueva el certificado Let's Encrypt mediante HTTP-01.
+Una segunda red sin puertos publicados permite a la API acceder a Supabase y otros
+servicios externos. Certbot obtiene y renueva el certificado Let's Encrypt mediante HTTP-01.
 
 Requisitos:
 
