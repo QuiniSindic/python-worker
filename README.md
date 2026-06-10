@@ -201,6 +201,58 @@ Si haces redeploy sobre una base nueva o acabas de cambiar el schema:
 2. ejecuta `uv run bootstrap-football`
 3. reinicia API y workers
 
+## Despliegue con Docker, Nginx y HTTPS
+
+El despliegue Docker publica solamente Nginx en los puertos `80` y `443`. La API
+escucha en `8000` dentro de la red privada de Compose y no queda expuesta directamente.
+Certbot obtiene y renueva el certificado Let's Encrypt mediante HTTP-01.
+
+Requisitos:
+
+- el registro DNS de `DOMAIN` debe apuntar al servidor
+- los puertos `80` y `443` deben estar abiertos
+- Docker Compose debe poder acceder a Internet durante la construccion y la emision TLS
+
+1. Completa el `.env` existente con las variables de `.env.docker.example`, especialmente:
+
+```env
+DOMAIN=api.example.com
+LETSENCRYPT_EMAIL=admin@example.com
+CERTBOT_STAGING=0
+FRONTEND_ORIGINS=https://frontend.example.com
+```
+
+2. Construye y arranca los servicios:
+
+```bash
+docker compose up -d --build
+```
+
+3. Revisa la emision inicial del certificado y el estado de los servicios:
+
+```bash
+docker compose logs -f certbot nginx
+docker compose ps
+```
+
+Nginx usa un certificado autofirmado temporal durante el primer arranque. Cuando Certbot
+obtiene el certificado real, Nginx lo detecta y recarga automaticamente. Las peticiones HTTP
+se redirigen a HTTPS.
+
+Smoke checks:
+
+```bash
+curl -I http://api.example.com/health
+curl https://api.example.com/health
+docker compose exec nginx nginx -t
+docker compose run --rm --entrypoint certbot certbot renew --dry-run
+```
+
+Para probar inicialmente sin consumir los limites de Let's Encrypt, usa
+`CERTBOT_STAGING=1`. Los certificados de staging no son de confianza publica; despues
+elimina los volumenes TLS y arranca con `CERTBOT_STAGING=0` para solicitar el certificado
+de produccion.
+
 ## Checklist antes de tocar otro deporte
 
 Antes de meter motorsport, basket o tenis, este baseline de futbol deberia quedar cerrado:

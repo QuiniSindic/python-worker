@@ -1,0 +1,76 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    expose:
+      - "8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+    networks:
+      - backend
+
+  nginx:
+    build:
+      context: ./docker/nginx
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - letsencrypt:/etc/letsencrypt:ro
+      - certbot_webroot:/var/www/certbot:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/nginx-health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - frontend
+      - backend
+
+  certbot:
+    image: certbot/certbot:latest
+    entrypoint: ["/bin/sh", "/opt/certbot/entrypoint.sh"]
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
+      LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL:?Set LETSENCRYPT_EMAIL in .env}
+      CERTBOT_STAGING: ${CERTBOT_STAGING:-0}
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - certbot_webroot:/var/www/certbot
+      - ./docker/certbot/entrypoint.sh:/opt/certbot/entrypoint.sh:ro
+    depends_on:
+      nginx:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - frontend
+
+volumes:
+  letsencrypt:
+  certbot_webroot:
+
+networks:
+  frontend:
+  backend:
+    internal: true
