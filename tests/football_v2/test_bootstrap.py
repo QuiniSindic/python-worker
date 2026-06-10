@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from unittest import TestCase
 
-from app.domains.football_v2.bootstrap import _normalize_standings_groups
+from app.domains.football_v2.jobs.bootstrap import _normalize_standings_groups
 
 
 class FootballBootstrapHelpersTests(TestCase):

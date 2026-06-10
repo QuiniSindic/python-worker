@@ -54,6 +54,7 @@ INTERNAL_API_KEY=
 ```
 
 Notas:
+
 - `FRONTEND_ORIGINS` controla CORS del frontend desplegado. Acepta varias origins separadas por coma.
 - `INTERNAL_API_KEY` es opcional y solo hace falta si expones endpoints internos en el futuro.
 

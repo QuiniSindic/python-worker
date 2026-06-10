@@ -25,11 +25,13 @@ dev = [
 [project.scripts]
 api = "app.cli:api_main"
 api-dev = "app.cli:api_dev_main"
-check = "app.cli:check_entry"
-test = "app.cli:test_entry"
-bootstrap-football = "app.cli:bootstrap_football_entry"
-worker-football-live = "app.cli:worker_football_live_entry"
-worker-football-post-match = "app.cli:worker_football_post_match_entry"
+check = "app.cli:check_backend"
+test = "app.cli:run_tests"
+bootstrap-football = "app.cli:sync_football_data"
+worker-football-live = "app.cli:run_football_live_worker"
+worker-football-post-match = "app.cli:run_football_post_match_worker"
+score-pickem = "app.cli:score_pickem_entry"
+sync-pickem-players = "app.cli:sync_pickem_players_entry"
 
 [tool.setuptools.packages.find]
 include = ["app*"]

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query
 
-from app.api.deps import get_current_user
+from app.api.auth import get_current_user
 from app.domains.football_v2 import FootballV2Service
 from app.schemas.auth import AuthenticatedUser
 from app.schemas.catalog import CompetitionEditionLite

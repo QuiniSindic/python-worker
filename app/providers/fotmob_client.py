@@ -76,7 +76,9 @@ class FotmobClient:
         self.headers = {"User-Agent": user_agent}
 
     async def fetch_live_matches(self, date_str: str) -> dict:
-        return await self._get_json(f"https://www.fotmob.com/api/data/matches?date={date_str}&timezone=Europe%2FMadrid&ccode3=ESP")
+        return await self._get_json(
+            f"https://www.fotmob.com/api/data/matches?date={date_str}&timezone=Europe%2FMadrid&ccode3=ESP"
+        )
 
     async def fetch_standings(self, league_id: int) -> dict | list:
         return await self._get_json(f"https://www.fotmob.com/api/data/tltable?leagueId={league_id}")
@@ -103,6 +105,11 @@ class FotmobClient:
 
     async def fetch_league_season(self, league_id: int) -> dict:
         return await self._get_json(f"https://www.fotmob.com/api/data/leagues?id={league_id}")
+
+    async def fetch_team(self, team_id: int) -> dict:
+        return await self._get_json(
+            f"https://www.fotmob.com/api/data/teams?id={team_id}&ccode3=ESP"
+        )
 
     async def _get_json(self, url: str) -> dict | list:
         async with httpx.AsyncClient(timeout=self.timeout) as client:

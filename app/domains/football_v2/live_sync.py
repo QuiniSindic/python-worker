@@ -51,7 +51,9 @@ def _recoverable_live_dates(
     *,
     now: datetime,
 ) -> list[str]:
-    stale_live_events = repository.list_recoverable_live_events(
+    if not hasattr(repository, "list_recoverable_live_matches"):
+        return []
+    stale_live_events = repository.list_recoverable_live_matches(
         "fotmob",
         started_after=(now - timedelta(days=RECOVERY_LOOKBACK_DAYS)).isoformat(),
         started_before=(now - timedelta(hours=RECOVERY_GRACE_HOURS)).isoformat(),
@@ -119,7 +121,7 @@ class FootballLiveSyncService:
             logger.debug("[live-sync] no matches found for scanned dates")
             return stats
 
-        existing_events = self.repository.list_events_by_provider_event_ids(
+        existing_events = self.repository.list_matches_by_provider_ids(
             "fotmob", list(live_by_provider_id)
         )
         if not existing_events:
@@ -139,7 +141,7 @@ class FootballLiveSyncService:
 
         event_ids = [row["id"] for row in existing_events]
         football_rows = {
-            row["event_id"]: row for row in self.repository.list_football_event_rows(event_ids)
+            row["event_id"]: row for row in self.repository.list_football_match_details(event_ids)
         }
         detailed_match_ids = [
             int(provider_event_id)
@@ -223,8 +225,8 @@ class FootballLiveSyncService:
                 }
             )
 
-        self.repository.upsert_events(event_payloads)
-        self.repository.upsert_football_events(football_payloads)
+        self.repository.upsert_matches(event_payloads)
+        self.repository.upsert_football_match_details(football_payloads)
 
         stats = {
             "dates_synced": len(dates),

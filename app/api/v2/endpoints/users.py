@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query
 
-from app.api.deps import get_current_user
+from app.api.auth import get_current_user
 from app.schemas.auth import AuthenticatedUser, CurrentUserResponse, PublicProfile
 from app.services.users_query_service import UsersQueryService
 

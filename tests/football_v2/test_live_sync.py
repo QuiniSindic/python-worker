@@ -9,11 +9,11 @@ from app.schemas.match import CompetitionData, MatchData, MatchStatus, TeamInfo
 
 class _FakeLiveRepository:
     def __init__(self) -> None:
-        self.upserted_events: list[dict] = []
-        self.upserted_football_events: list[dict] = []
+        self.upserted_matches: list[dict] = []
+        self.upserted_football_match_details: list[dict] = []
         self.sync_state: dict | None = None
 
-    def list_events_by_provider_event_ids(
+    def list_matches_by_provider_ids(
         self,
         provider_name: str,
         provider_event_ids: list[str],
@@ -43,7 +43,7 @@ class _FakeLiveRepository:
             if provider_event_id == "1113"
         ]
 
-    def list_football_event_rows(self, event_ids: list[int]) -> list[dict]:
+    def list_football_match_details(self, event_ids: list[int]) -> list[dict]:
         return [
             {
                 "event_id": event_id,
@@ -65,12 +65,12 @@ class _FakeLiveRepository:
             for event_id in event_ids
         ]
 
-    def upsert_events(self, event_payloads: list[dict]) -> list[dict]:
-        self.upserted_events = event_payloads
-        return event_payloads
+    def upsert_matches(self, match_payloads: list[dict]) -> list[dict]:
+        self.upserted_matches = match_payloads
+        return match_payloads
 
-    def upsert_football_events(self, payloads: list[dict]) -> None:
-        self.upserted_football_events = payloads
+    def upsert_football_match_details(self, payloads: list[dict]) -> None:
+        self.upserted_football_match_details = payloads
 
     def upsert_sync_state(
         self,
@@ -148,12 +148,12 @@ class FootballLiveSyncServiceTests(TestCase):
 
         self.assertEqual(stats["events_updated"], 1)
         self.assertEqual(stats["details_updated"], 1)
-        self.assertEqual(repository.upserted_events[0]["status"], "live")
-        self.assertEqual(repository.upserted_football_events[0]["minute"], "12'")
-        self.assertEqual(repository.upserted_football_events[0]["home_score"], 1)
-        self.assertEqual(repository.upserted_football_events[0]["away_score"], 0)
+        self.assertEqual(repository.upserted_matches[0]["status"], "live")
+        self.assertEqual(repository.upserted_football_match_details[0]["minute"], "12'")
+        self.assertEqual(repository.upserted_football_match_details[0]["home_score"], 1)
+        self.assertEqual(repository.upserted_football_match_details[0]["away_score"], 0)
         self.assertEqual(
-            repository.upserted_football_events[0]["timeline"],
+            repository.upserted_football_match_details[0]["timeline"],
             [{"type": "Goal", "minute": 12, "player": "Dembele"}],
         )
         self.assertEqual(repository.sync_state["state_key"], "worker-football-live")

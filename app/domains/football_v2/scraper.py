@@ -5,7 +5,7 @@ from datetime import datetime
 
 import httpx
 
-from app.core.config import FOTMOB_TARGET_LEAGUE_IDS
+from app.domains.football_v2.fotmob_league_ids import FOTMOB_TARGET_LEAGUE_IDS
 from app.providers.fotmob_client import FotmobClient, FotmobPayloadError
 from app.providers.fotmob_mapper import FotmobMapper
 from app.schemas.match import CompetitionData
@@ -76,5 +76,19 @@ class ScraperService:
         except Exception as exc:
             logger.exception(
                 "Unexpected error while mapping season matches for league %s: %s", league_id, exc
+            )
+        return []
+
+    async def get_team_squad(self, team_id: int) -> list[dict]:
+        try:
+            payload = await self.client.fetch_team(team_id)
+            return self.mapper.map_team_squad_payload(payload, team_id)
+        except FotmobPayloadError as exc:
+            logger.warning("FotMob team squad payload unavailable for team %s: %s", team_id, exc)
+        except httpx.HTTPError as exc:
+            logger.error("FotMob team squad request failed for team %s: %s", team_id, exc)
+        except Exception as exc:
+            logger.exception(
+                "Unexpected error while mapping team squad for team %s: %s", team_id, exc
             )
         return []

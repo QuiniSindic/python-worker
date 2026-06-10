@@ -118,7 +118,7 @@ class FootballV2Service:
         season_ids = self._resolve_feed_season_ids(competition_id)
         resolved_limit = self._resolve_feed_limit(competition_id, limit)
         return self._group_matches_by_competition(
-            self.repository.list_events_for_seasons(
+            self.repository.list_matches_for_seasons(
                 season_ids,
                 bucket,
                 from_date,
@@ -129,7 +129,7 @@ class FootballV2Service:
         )
 
     def get_event(self, event_id: int) -> MatchResponse:
-        row = self.repository.get_event(event_id)
+        row = self.repository.get_match(event_id)
         if not row:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
         return self._map_match_payloads([row])[0]
@@ -146,23 +146,23 @@ class FootballV2Service:
 
         event_ids = [row["id"] for row in bracket_rows]
         football_rows = {
-            row["event_id"]: row for row in self.repository.list_football_event_rows(event_ids)
+            row["event_id"]: row for row in self.repository.list_football_match_details(event_ids)
         }
-        participants_rows = self.repository.list_event_participants(event_ids)
-        participants = {
+        match_competitor_rows = self.repository.list_match_competitors(event_ids)
+        competitors = {
             row["id"]: row
-            for row in self.repository.list_participants(
+            for row in self.repository.list_competitors(
                 [
                     row["participant_id"]
-                    for row in participants_rows
+                    for row in match_competitor_rows
                     if row.get("participant_id") is not None
                 ]
             )
         }
         slots_by_event: dict[int, dict[str, dict]] = defaultdict(dict)
-        for row in participants_rows:
+        for row in match_competitor_rows:
             slots_by_event[row["event_id"]][row["slot_key"]] = {
-                "participant": participants.get(row.get("participant_id")),
+                "participant": competitors.get(row.get("participant_id")),
                 "placeholder": row.get("placeholder_label"),
             }
 
@@ -241,9 +241,9 @@ class FootballV2Service:
         rows = self.repository.list_standings_rows(
             season["id"], phase["id"], selected_group["id"] if selected_group else None
         )
-        participants = {
+        competitors = {
             row["id"]: row
-            for row in self.repository.list_participants([row["participant_id"] for row in rows])
+            for row in self.repository.list_competitors([row["participant_id"] for row in rows])
         }
         rows_by_group: dict[int, list[dict]] = defaultdict(list)
         for row in rows:
@@ -258,7 +258,7 @@ class FootballV2Service:
                     name=group["name"],
                     order=group["order_index"],
                     teams=[
-                        self._map_standing_row(item, participants.get(item["participant_id"]))
+                        self._map_standing_row(item, competitors.get(item["participant_id"]))
                         for item in rows_by_group.get(group["id"], [])
                     ],
                 )
@@ -327,7 +327,7 @@ class FootballV2Service:
     def save_prediction(
         self, event_id: int, payload: PredictionUpsertPayload, user: AuthenticatedUser
     ) -> PredictionRowResponse:
-        event = self.repository.get_event(event_id)
+        event = self.repository.get_match(event_id)
         if not event:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
         if event["status"] != "scheduled":
@@ -351,14 +351,14 @@ class FootballV2Service:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Prediction not found"
             )
-        event = self.repository.get_event(event_id)
+        event = self.repository.get_match(event_id)
         if not event or event["status"] != "scheduled":
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Event is locked")
         row = self.repository.upsert_prediction(
             user_id=user.id,
-            sport_id=existing["sport_id"],
-            competition_id=existing["competition_id"],
-            season_id=existing["competition_season_id"],
+            sport_id=event["sport_id"],
+            competition_id=event["competition_id"],
+            season_id=event["competition_season_id"],
             event_id=event_id,
             home_score=home_score,
             away_score=away_score,
@@ -367,28 +367,10 @@ class FootballV2Service:
         return self._map_prediction_row(row)
 
     def get_prediction_feed(self) -> list[PredictionFeedItemResponse]:
-        prediction_rows = (
-            self.repository.supabase.table("predictions")
-            .select("*")
-            .order("created_at", desc=True)
-            .execute()
-            .data
-            or []
-        )
+        prediction_rows = self.repository.list_all_predictions()
         if not prediction_rows:
             return []
         event_ids = [row["event_id"] for row in prediction_rows]
-        details = {
-            row["prediction_id"]: row
-            for row in (
-                self.repository.supabase.table("football_predictions")
-                .select("*")
-                .in_("prediction_id", [row["id"] for row in prediction_rows])
-                .execute()
-                .data
-                or []
-            )
-        }
         profiles = {
             row["id"]: row
             for row in self.repository.get_profiles(
@@ -396,18 +378,18 @@ class FootballV2Service:
             )
         }
         football_event_rows = {
-            row["event_id"]: row for row in self.repository.list_football_event_rows(event_ids)
+            row["event_id"]: row for row in self.repository.list_football_match_details(event_ids)
         }
         matches = {
             row.id: row
-            for row in self._map_match_payloads(self.repository.list_events_by_ids(event_ids))
+            for row in self._map_match_payloads(self.repository.list_matches_by_ids(event_ids))
         }
         sports = {row["id"]: row for row in self.repository.list_sports()}
+        competition_ids = [
+            match.competitionid for match in matches.values() if match.competitionid is not None
+        ]
         competitions = {
-            row["id"]: row
-            for row in self.repository.list_competitions(
-                [row["competition_id"] for row in prediction_rows]
-            )
+            row["id"]: row for row in self.repository.list_competitions(competition_ids)
         }
         return [
             PredictionFeedItemResponse(
@@ -420,14 +402,16 @@ class FootballV2Service:
                 matchStatus=matches[row["event_id"]].status,
                 homeTeam=matches[row["event_id"]].homeTeam.name,
                 awayTeam=matches[row["event_id"]].awayTeam.name,
-                predicted=f"{details.get(row['id'], {}).get('home_score', '-')}-{details.get(row['id'], {}).get('away_score', '-')}",
+                predicted=f"{row.get('home_score', '-')}-{row.get('away_score', '-')}",
                 homeScore=football_event_rows.get(row["event_id"], {}).get("home_score"),
                 awayScore=football_event_rows.get(row["event_id"], {}).get("away_score"),
                 minute=football_event_rows.get(row["event_id"], {}).get("minute"),
-                sportId=row["sport_id"],
-                sportName=sports.get(row["sport_id"], {}).get("name", "Football"),
-                competitionId=row["competition_id"],
-                competitionName=competitions.get(row["competition_id"], {}).get("name", ""),
+                sportId=matches[row["event_id"]].sportId,
+                sportName=sports.get(matches[row["event_id"]].sportId, {}).get("name", "Football"),
+                competitionId=matches[row["event_id"]].competitionid,
+                competitionName=competitions.get(matches[row["event_id"]].competitionid, {}).get(
+                    "name", ""
+                ),
                 points=row.get("points"),
                 createdAt=row["created_at"],
             )
@@ -446,15 +430,29 @@ class FootballV2Service:
         )
 
     def get_leaderboard(self, scope: str, filter_id: int | None) -> list[LeaderboardEntry]:
-        prediction_rows = (
-            self.repository.supabase.table("predictions").select("*").execute().data or []
-        )
+        prediction_rows = self.repository.list_all_predictions()
+        matches = {
+            row.id: row
+            for row in self._map_match_payloads(
+                self.repository.list_matches_by_ids([row["event_id"] for row in prediction_rows])
+            )
+        }
         if scope == "sport" and filter_id is not None:
-            prediction_rows = [row for row in prediction_rows if row["sport_id"] == filter_id]
+            prediction_rows = [
+                row
+                for row in prediction_rows
+                if row["event_id"] in matches and matches[row["event_id"]].sportId == filter_id
+            ]
         elif scope == "competition" and filter_id is not None:
             season = self.repository.get_current_season_by_competition(filter_id)
             prediction_rows = (
-                [row for row in prediction_rows if row["competition_season_id"] == season["id"]]
+                [
+                    row
+                    for row in prediction_rows
+                    if row["event_id"] in matches
+                    and matches[row["event_id"]].edition
+                    and matches[row["event_id"]].edition.id == season["id"]
+                ]
                 if season
                 else []
             )
@@ -551,8 +549,8 @@ class FootballV2Service:
             for row in phases
             if row.get("is_bracket_phase") or row["phase_type"] in {"knockout_round", "final_stage"}
         }
-        events = self.repository.list_events_for_seasons([season_id], "live")
-        events.extend(self.repository.list_events_for_seasons([season_id], "results"))
+        events = self.repository.list_matches_for_seasons([season_id], "live")
+        events.extend(self.repository.list_matches_for_seasons([season_id], "results"))
         bracket_rows = [
             row for row in events if row.get("competition_phase_id") in bracket_phase_ids
         ]
@@ -561,7 +559,7 @@ class FootballV2Service:
 
         event_ids = [row["id"] for row in events]
         football_rows_by_event = {
-            row["event_id"]: row for row in self.repository.list_football_event_rows(event_ids)
+            row["event_id"]: row for row in self.repository.list_football_match_details(event_ids)
         }
         return [
             row
@@ -673,15 +671,15 @@ class FootballV2Service:
             return []
         event_ids = [row["id"] for row in event_rows]
         football_rows = {
-            row["event_id"]: row for row in self.repository.list_football_event_rows(event_ids)
+            row["event_id"]: row for row in self.repository.list_football_match_details(event_ids)
         }
-        participants_rows = self.repository.list_event_participants(event_ids)
-        participants = {
+        match_competitor_rows = self.repository.list_match_competitors(event_ids)
+        competitors = {
             row["id"]: row
-            for row in self.repository.list_participants(
+            for row in self.repository.list_competitors(
                 [
                     row["participant_id"]
-                    for row in participants_rows
+                    for row in match_competitor_rows
                     if row.get("participant_id") is not None
                 ]
             )
@@ -699,9 +697,9 @@ class FootballV2Service:
             )
         }
         slots_by_event: dict[int, dict[str, dict]] = defaultdict(dict)
-        for row in participants_rows:
+        for row in match_competitor_rows:
             slots_by_event[row["event_id"]][row["slot_key"]] = {
-                "participant": participants.get(row.get("participant_id")),
+                "participant": competitors.get(row.get("participant_id")),
                 "placeholder": row.get("placeholder_label"),
             }
         mapped: list[MatchResponse] = []

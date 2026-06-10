@@ -2,22 +2,14 @@ from __future__ import annotations
 
 from fastapi import Header, HTTPException, status
 
+from app.api.auth_utils import extract_username
 from app.core.config import settings
 from app.core.supabase import get_auth_client
 from app.schemas.auth import AuthenticatedUser
 
 
-def _extract_username(email: str | None, user_metadata: dict | None) -> str:
-    if isinstance(user_metadata, dict):
-        username = user_metadata.get("username")
-        if isinstance(username, str) and username.strip():
-            return username.strip()
-    if email and "@" in email:
-        return email.split("@", maxsplit=1)[0]
-    return "Usuario"
-
-
 def get_current_user(authorization: str | None = Header(default=None)) -> AuthenticatedUser:
+    """Validar el Supabase Bearer token devuelve current user"""
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -53,11 +45,12 @@ def get_current_user(authorization: str | None = Header(default=None)) -> Authen
     return AuthenticatedUser(
         id=user.id,
         email=email,
-        username=_extract_username(email, user_metadata),
+        username=extract_username(email, user_metadata),
     )
 
 
 def require_internal_access(x_internal_key: str | None = Header(default=None)) -> None:
+    """Validar endpoints with X-Internal-Key"""
     if not settings.INTERNAL_API_KEY:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

@@ -3,8 +3,8 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime, timedelta
 
-from app.domains.football_v2.bootstrap import FootballBootstrapService
 from app.domains.football_v2.catalog import COMPETITIONS_BY_FOTMOB_ID
+from app.domains.football_v2.jobs.bootstrap import FootballBootstrapService
 from app.domains.football_v2.live_sync import (
     FootballLiveSyncService,
     _match_status_value,
@@ -77,7 +77,7 @@ class FootballPostMatchSyncService:
             logger.debug("[post-match-sync] no finished matches detected in scanned dates")
             return stats
 
-        existing_events = self.repository.list_events_by_provider_event_ids(
+        existing_events = self.repository.list_matches_by_provider_ids(
             "fotmob", list(finished_by_provider_id)
         )
         competitions_to_refresh: list[int] = []

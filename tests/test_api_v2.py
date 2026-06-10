@@ -4,8 +4,8 @@ from unittest import TestCase
 
 from fastapi.testclient import TestClient
 
-from app.api.deps import get_current_user
-from app.api.v2.endpoints import catalog, football, leaderboard, users
+from app.api.auth import get_current_user
+from app.api.v2.endpoints import catalog, football, leaderboard, pickem, users
 from app.main import app
 from app.schemas.auth import AuthenticatedUser
 from app.schemas.catalog import CompetitionEditionLite
@@ -393,17 +393,105 @@ class _FakeUsersService:
         ]
 
 
+class _FakePickemService:
+    def get_current_contest(self, competition_slug: str = "fifa-world-cup") -> dict:
+        return {
+            "id": 1,
+            "slug": "fifa-world-cup-2026",
+            "name": "Pick'em Mundial 2026",
+            "competition_id": 77,
+            "competition_season_id": 10,
+            "group_deadline": "2026-06-11T19:00:00+00:00",
+            "awards_deadline": "2026-06-11T19:00:00+00:00",
+            "scoring_config": {"exact_score_bonus": 2},
+            "groups": [],
+            "award_candidates": [],
+            "champion_candidates": [],
+        }
+
+    def get_entry(self, contest_id: int, user: AuthenticatedUser) -> dict:
+        return self._entry(contest_id, user.id)
+
+    def save_group_picks(
+        self,
+        contest_id: int,
+        payload: object,
+        user: AuthenticatedUser,
+    ) -> dict:
+        return self._entry(contest_id, user.id)
+
+    def save_award_picks(
+        self,
+        contest_id: int,
+        payload: object,
+        user: AuthenticatedUser,
+    ) -> dict:
+        return self._entry(contest_id, user.id)
+
+    def save_match_pick(
+        self,
+        contest_id: int,
+        event_id: int,
+        payload: object,
+        user: AuthenticatedUser,
+    ) -> dict:
+        return {
+            "event_id": event_id,
+            "winner_participant_id": 1,
+            "home_score": 2,
+            "away_score": 1,
+            "points": None,
+            "winner_points": None,
+            "exact_score_points": None,
+            "is_winner_hit": None,
+            "is_exact_score": None,
+        }
+
+    def get_leaderboard(self, contest_id: int) -> list[dict]:
+        return [
+            {
+                "user_id": "user-1",
+                "username": "elian",
+                "avatar_url": None,
+                "total_points": 30,
+                "group_points": 12,
+                "knockout_points": 8,
+                "award_points": 10,
+                "perfect_groups": 1,
+                "exact_scores": 2,
+            }
+        ]
+
+    def _entry(self, contest_id: int, user_id: str) -> dict:
+        return {
+            "id": "entry-1",
+            "contest_id": contest_id,
+            "user_id": user_id,
+            "total_points": 0,
+            "group_points": 0,
+            "knockout_points": 0,
+            "award_points": 0,
+            "perfect_groups": 0,
+            "exact_scores": 0,
+            "group_picks": [],
+            "award_picks": [],
+            "match_picks": [],
+        }
+
+
 class ApiV2Tests(TestCase):
     def setUp(self) -> None:
         self.original_football_service = football.service
         self.original_catalog_service = catalog.service
         self.original_leaderboard_service = leaderboard.service
+        self.original_pickem_service = pickem.service
         self.original_users_service = users.users_service
 
         fake_service = _FakeFootballService()
         football.service = fake_service
         catalog.service = fake_service
         leaderboard.service = fake_service
+        pickem.service = _FakePickemService()
         users.users_service = _FakeUsersService()
 
         app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
@@ -417,6 +505,7 @@ class ApiV2Tests(TestCase):
         football.service = self.original_football_service
         catalog.service = self.original_catalog_service
         leaderboard.service = self.original_leaderboard_service
+        pickem.service = self.original_pickem_service
         users.users_service = self.original_users_service
         app.dependency_overrides.clear()
         self.client.close()
@@ -529,3 +618,37 @@ class ApiV2Tests(TestCase):
         self.assertEqual(len(profiles_response.json()), 2)
         self.assertEqual(leaderboard_response.json()[0]["total_points"], 10)
         self.assertEqual(leaderboard_filters_response.json()["sports"][0]["slug"], "football")
+
+    def test_pickem_endpoints_expose_contest_entry_picks_and_leaderboard(self) -> None:
+        contest_response = self.client.get("/api/v2/pickem/contests/current")
+        me_response = self.client.get("/api/v2/pickem/contests/1/me")
+        groups_response = self.client.put(
+            "/api/v2/pickem/contests/1/groups",
+            json={"groups": []},
+        )
+        awards_response = self.client.put(
+            "/api/v2/pickem/contests/1/awards",
+            json={
+                "mvp_candidate_id": 1,
+                "top_scorer_candidate_id": 2,
+                "best_goalkeeper_candidate_id": 3,
+                "champion_participant_id": 4,
+            },
+        )
+        match_response = self.client.put(
+            "/api/v2/pickem/contests/1/matches/501",
+            json={"winner_participant_id": 1, "home_score": 2, "away_score": 1},
+        )
+        leaderboard_response = self.client.get("/api/v2/pickem/contests/1/leaderboard")
+
+        self.assertEqual(contest_response.status_code, 200)
+        self.assertEqual(me_response.status_code, 200)
+        self.assertEqual(groups_response.status_code, 200)
+        self.assertEqual(awards_response.status_code, 200)
+        self.assertEqual(match_response.status_code, 200)
+        self.assertEqual(leaderboard_response.status_code, 200)
+
+        self.assertEqual(contest_response.json()["slug"], "fifa-world-cup-2026")
+        self.assertEqual(me_response.json()["user_id"], "user-1")
+        self.assertEqual(match_response.json()["event_id"], 501)
+        self.assertEqual(leaderboard_response.json()[0]["total_points"], 30)

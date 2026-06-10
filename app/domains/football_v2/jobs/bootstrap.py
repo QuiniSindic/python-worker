@@ -10,6 +10,7 @@ from app.domains.football_v2.catalog import FOOTBALL_COMPETITIONS, FootballCompe
 from app.domains.football_v2.competition_structure_service import (
     FootballCompetitionStructureService,
 )
+from app.domains.football_v2.pickem_bootstrap import PickemBootstrapService
 from app.domains.football_v2.repository import FootballV2Repository
 from app.domains.football_v2.scraper import ScraperService
 from app.domains.football_v2.season import SeasonRule, resolve_current_season
@@ -269,25 +270,13 @@ class FootballBootstrapService:
                             "updated_at": datetime.now(UTC).isoformat(),
                         }
                     )
-        participants = self.repository.upsert_participants(participant_payloads)
-        participants_by_provider_id = {
+        competitors = self.repository.upsert_competitors(participant_payloads)
+        competitors_by_provider_id = {
             int(row["metadata"]["provider_team_id"]): row
-            for row in participants
+            for row in competitors
             if isinstance(row.get("metadata"), dict)
             and row["metadata"].get("provider_team_id") is not None
         }
-        self.repository.upsert_season_participants(
-            [
-                {
-                    "competition_season_id": season_row["id"],
-                    "participant_id": row["id"],
-                    "role": "entrant",
-                    "metadata": {},
-                    "updated_at": datetime.now(UTC).isoformat(),
-                }
-                for row in participants
-            ]
-        )
 
         event_payloads: list[dict[str, Any]] = []
         football_rows_by_provider: dict[str, dict[str, Any]] = {}
@@ -339,7 +328,7 @@ class FootballBootstrapService:
                 {
                     "slot_key": "home",
                     "slot_order": 0,
-                    "participant_id": participants_by_provider_id.get(match.homeId, {}).get("id"),
+                    "participant_id": competitors_by_provider_id.get(match.homeId, {}).get("id"),
                     "placeholder_label": None if match.homeId > 0 else match.homeTeam.name,
                     "is_placeholder": match.homeId <= 0,
                     "metadata": {},
@@ -348,22 +337,22 @@ class FootballBootstrapService:
                 {
                     "slot_key": "away",
                     "slot_order": 1,
-                    "participant_id": participants_by_provider_id.get(match.awayId, {}).get("id"),
+                    "participant_id": competitors_by_provider_id.get(match.awayId, {}).get("id"),
                     "placeholder_label": None if match.awayId > 0 else match.awayTeam.name,
                     "is_placeholder": match.awayId <= 0,
                     "metadata": {},
                     "updated_at": datetime.now(UTC).isoformat(),
                 },
             ]
-        events = self.repository.upsert_events(event_payloads)
-        self.repository.upsert_event_participants(
+        events = self.repository.upsert_matches(event_payloads)
+        self.repository.upsert_match_competitors(
             [
                 {"event_id": event["id"], **slot}
                 for event in events
                 for slot in slots_by_provider[event["provider_event_id"]]
             ]
         )
-        self.repository.upsert_football_events(
+        self.repository.upsert_football_match_details(
             [
                 {"event_id": event["id"], **football_rows_by_provider[event["provider_event_id"]]}
                 for event in events
@@ -404,15 +393,15 @@ class FootballBootstrapService:
                     if not group_row:
                         continue
                     for team in group.teams:
-                        participant = participants_by_provider_id.get(int(team.id))
-                        if not participant:
+                        competitor = competitors_by_provider_id.get(int(team.id))
+                        if not competitor:
                             continue
                         standings_payloads.append(
                             {
                                 "competition_season_id": season_row["id"],
                                 "competition_phase_id": phase["id"],
                                 "phase_group_id": group_row["id"],
-                                "participant_id": participant["id"],
+                                "participant_id": competitor["id"],
                                 "position": team.position,
                                 "played": team.played,
                                 "wins": team.wins,
@@ -428,11 +417,13 @@ class FootballBootstrapService:
                             }
                         )
         self.repository.replace_standings(season_row["id"], standings_payloads)
+        if definition.slug == "fifa-world-cup":
+            PickemBootstrapService().ensure_world_cup_contest(season_row)
 
         return {
             "competitions": 1,
             "seasons": 1,
-            "participants": len(participants),
+            "participants": len(competitors),
             "events": len(events),
             "standings_rows": len(standings_payloads),
         }

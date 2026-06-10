@@ -647,6 +647,57 @@ class FotmobMapper:
             processed.append(clean_event)
         return processed
 
+    def map_team_squad_payload(self, payload: dict[str, Any], team_id: int) -> list[dict[str, Any]]:
+        if not isinstance(payload, dict):
+            logger.warning("Unexpected FotMob team payload for team %s", team_id)
+            return []
+
+        team_details = (
+            payload.get("details", {}) if isinstance(payload.get("details"), dict) else {}
+        )
+        team_name = team_details.get("name")
+        squad_block = payload.get("squad", {})
+        groups = squad_block.get("squad", []) if isinstance(squad_block, dict) else []
+        players: list[dict[str, Any]] = []
+
+        for group in groups:
+            if not isinstance(group, dict):
+                continue
+            group_title = str(group.get("title") or "")
+            if group_title == "coach":
+                continue
+            members = group.get("members", [])
+            if not isinstance(members, list):
+                continue
+            for member in members:
+                if not isinstance(member, dict) or member.get("excludeFromRanking"):
+                    continue
+                player_id = member.get("id")
+                player_name = self._clean_text(member.get("name"))
+                if player_id is None or not player_name:
+                    continue
+                role = member.get("role") if isinstance(member.get("role"), dict) else {}
+                players.append(
+                    {
+                        "player_id": int(player_id),
+                        "name": player_name,
+                        "team_id": team_id,
+                        "team_name": team_name,
+                        "group": group_title,
+                        "role_key": role.get("key"),
+                        "role": role.get("fallback"),
+                        "position_id": member.get("positionId"),
+                        "position_ids": member.get("positionIds"),
+                        "position_ids_desc": member.get("positionIdsDesc"),
+                        "shirt_number": member.get("shirtNumber"),
+                        "club_name": member.get("cname"),
+                        "age": member.get("age"),
+                        "date_of_birth": member.get("dateOfBirth"),
+                    }
+                )
+
+        return players
+
     def map_season_matches_payload(self, payload: dict[str, Any]) -> list[CompetitionData]:
         if not isinstance(payload, dict):
             return []

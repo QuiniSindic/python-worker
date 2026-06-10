@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from unittest import TestCase
 
-from app.domains.football_v2.post_match_sync import FootballPostMatchSyncService
+from app.domains.football_v2.jobs.sync_finished_matches_job import FootballPostMatchSyncService
 from app.schemas.match import CompetitionData, MatchData, MatchStatus, TeamInfo
 
 
@@ -12,7 +12,7 @@ class _FakePostMatchRepository:
         self.event_status = event_status
         self.sync_state: dict | None = None
 
-    def list_events_by_provider_event_ids(
+    def list_matches_by_provider_ids(
         self,
         provider_name: str,
         provider_event_ids: list[str],

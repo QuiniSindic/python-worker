@@ -599,6 +599,56 @@ class FotmobMapperTests(unittest.TestCase):
         self.assertEqual(competition.matches[0].round, "30")
         self.assertEqual(competition.matches[0].status, MatchStatus.NS)
 
+    def test_map_team_squad_payload_extracts_players_without_coach(self) -> None:
+        payload = {
+            "details": {"name": "France"},
+            "squad": {
+                "squad": [
+                    {
+                        "title": "coach",
+                        "members": [
+                            {
+                                "id": 1,
+                                "name": "Coach",
+                                "role": {"key": "coach", "fallback": "Coach"},
+                            }
+                        ],
+                    },
+                    {
+                        "title": "keepers",
+                        "members": [
+                            {
+                                "id": 2,
+                                "name": "Keeper",
+                                "role": {"key": "keeper_long", "fallback": "Keeper"},
+                                "positionId": 0,
+                                "positionIdsDesc": "GK",
+                                "excludeFromRanking": False,
+                            }
+                        ],
+                    },
+                    {
+                        "title": "attackers",
+                        "members": [
+                            {
+                                "id": 3,
+                                "name": "Forward",
+                                "role": {"key": "attacker_long", "fallback": "Attacker"},
+                                "positionId": 3,
+                                "positionIdsDesc": "ST",
+                                "excludeFromRanking": False,
+                            }
+                        ],
+                    },
+                ]
+            },
+        }
+
+        players = self.mapper.map_team_squad_payload(payload, 6723)
+
+        self.assertEqual([player["name"] for player in players], ["Keeper", "Forward"])
+        self.assertEqual(players[0]["team_name"], "France")
+
 
 if __name__ == "__main__":
     unittest.main()

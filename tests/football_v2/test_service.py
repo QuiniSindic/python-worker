@@ -27,7 +27,7 @@ class _FakeRepository:
             }
         ]
 
-    def list_events_for_seasons(
+    def list_matches_for_seasons(
         self,
         season_ids: list[int],
         bucket: str,
@@ -75,7 +75,7 @@ class _FakeRepository:
             },
         ]
 
-    def list_football_event_rows(self, event_ids: list[int]) -> list[dict]:
+    def list_football_match_details(self, event_ids: list[int]) -> list[dict]:
         return [
             {
                 "event_id": event_id,
@@ -90,7 +90,7 @@ class _FakeRepository:
             for event_id in event_ids
         ]
 
-    def list_event_participants(self, event_ids: list[int]) -> list[dict]:
+    def list_match_competitors(self, event_ids: list[int]) -> list[dict]:
         rows: list[dict] = []
         for event_id in event_ids:
             rows.extend(
@@ -111,7 +111,7 @@ class _FakeRepository:
             )
         return rows
 
-    def list_participants(self, participant_ids: list[int]) -> list[dict]:
+    def list_competitors(self, participant_ids: list[int]) -> list[dict]:
         return [
             {
                 "id": participant_id,
@@ -250,7 +250,7 @@ class _StandingsRepository:
             return rows
         return [row for row in rows if row["phase_group_id"] == group_id]
 
-    def list_participants(self, participant_ids: list[int]) -> list[dict]:
+    def list_competitors(self, participant_ids: list[int]) -> list[dict]:
         return [
             {"id": 100, "name": "Czechia", "badge_url": "czechia.png"},
             {"id": 101, "name": "Mexico", "badge_url": "mexico.png"},
@@ -270,7 +270,7 @@ class _BracketFallbackRepository:
     def list_phases_for_season(self, season_id: int) -> list[dict]:
         return []
 
-    def list_events_for_seasons(
+    def list_matches_for_seasons(
         self,
         season_ids: list[int],
         bucket: str,
@@ -291,7 +291,7 @@ class _BracketFallbackRepository:
             }
         ]
 
-    def list_football_event_rows(self, event_ids: list[int]) -> list[dict]:
+    def list_football_match_details(self, event_ids: list[int]) -> list[dict]:
         return [
             {
                 "event_id": 501,
@@ -305,7 +305,7 @@ class _BracketFallbackRepository:
             }
         ]
 
-    def list_event_participants(self, event_ids: list[int]) -> list[dict]:
+    def list_match_competitors(self, event_ids: list[int]) -> list[dict]:
         return [
             {
                 "event_id": 501,
@@ -321,7 +321,7 @@ class _BracketFallbackRepository:
             },
         ]
 
-    def list_participants(self, participant_ids: list[int]) -> list[dict]:
+    def list_competitors(self, participant_ids: list[int]) -> list[dict]:
         return []
 
     def list_competitions(self, competition_ids: list[int]) -> list[dict]:
@@ -426,7 +426,7 @@ class FootballV2ServiceTests(TestCase):
                     }
                 ]
 
-            def list_events_for_seasons(
+            def list_matches_for_seasons(
                 self,
                 season_ids: list[int],
                 bucket: str,
@@ -456,7 +456,7 @@ class FootballV2ServiceTests(TestCase):
                     ]
                 return []
 
-            def list_football_event_rows(self, event_ids: list[int]) -> list[dict]:
+            def list_football_match_details(self, event_ids: list[int]) -> list[dict]:
                 return [
                     {
                         "event_id": 502,
@@ -480,7 +480,7 @@ class FootballV2ServiceTests(TestCase):
                     },
                 ]
 
-            def list_event_participants(self, event_ids: list[int]) -> list[dict]:
+            def list_match_competitors(self, event_ids: list[int]) -> list[dict]:
                 return [
                     {
                         "event_id": 502,
@@ -508,7 +508,7 @@ class FootballV2ServiceTests(TestCase):
                     },
                 ]
 
-            def list_participants(self, participant_ids: list[int]) -> list[dict]:
+            def list_competitors(self, participant_ids: list[int]) -> list[dict]:
                 return [
                     {
                         "id": 1,
