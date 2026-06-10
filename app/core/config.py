@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     SUPABASE_KEY: str
     SUPABASE_SERVICE_ROLE_KEY: str
     INTERNAL_API_KEY: str | None = None
-    FRONTEND_ORIGINS: str = "http://localhost:3000"
+    FRONTEND_ORIGINS: str = "http://localhost:3000, https://sindic.lol"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
