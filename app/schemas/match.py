@@ -1,6 +1,9 @@
-from enum import IntEnum, Enum
-from typing import List, Optional, Union
+from __future__ import annotations
+
+from enum import IntEnum, StrEnum
+
 from pydantic import BaseModel, Field
+
 
 # Usamos IntEnum para que al serializar a JSON salga el número, igual que en TS
 class MatchEventType(IntEnum):
@@ -12,23 +15,26 @@ class MatchEventType(IntEnum):
     HalfTime = 46
     FinalTime = 47
     Overtime = 48
-    None_ = 0 
+    None_ = 0
+
 
 class TeamInfo(BaseModel):
     id: int
     name: str
     abbr: str
-    img: Optional[str] = None
+    img: str | None = None
     country: str
+
 
 class MatchEvent(BaseModel):
     type: MatchEventType
-    minute: Optional[Union[int, str]] = None
-    extraMinute: Optional[int] = None
-    team: Optional[int] = None
-    playerName: Optional[str] = None
-    score: Optional[str] = None
-    extra: Optional[str] = None
+    minute: int | str | None = None
+    extraMinute: int | None = None
+    team: int | None = None
+    playerName: str | None = None
+    score: str | None = None
+    extra: str | None = None
+
 
 class Odds(BaseModel):
     id: str
@@ -37,40 +43,45 @@ class Odds(BaseModel):
     awayOdd: float
     drawOdd: float
 
+
 # Validamos que el status sea uno de los permitidos
-class MatchStatus(str, Enum):
-    NS = 'NS'
-    HT = 'HT'
-    FT = 'FT'
-    OT = 'OT'
-    AET = 'AET'
-    AP = 'AP'
-    CANC = 'Canc.'
-    LIVE = 'LIVE' # Añado LIVE por si acaso
+class MatchStatus(StrEnum):
+    NS = "NS"
+    HT = "HT"
+    FT = "FT"
+    OT = "OT"
+    AET = "AET"
+    AP = "AP"
+    CANC = "Canc."
+    LIVE = "LIVE"  # Añado LIVE por si acaso
+
 
 class MatchData(BaseModel):
-    id: int # En TS es number
+    id: int  # En TS es number
     status: MatchStatus
     result: str
     kickoff: str
-    kickoff_iso: Optional[str] = None
-    minute: Optional[str] = None
-    round: Optional[str] = None
-    events: List[MatchEvent] = []
+    kickoff_iso: str | None = None
+    minute: str | None = None
+    round: str | None = None
+    events: list[MatchEvent] = []
     homeId: int
     awayId: int
     competitionid: int
     homeTeam: TeamInfo
     awayTeam: TeamInfo
     country: str
-    Odds: Optional[Odds] = None
+    odds: Odds | None = Field(default=None, alias="Odds")
+
+    model_config = {"populate_by_name": True}
+
 
 class CompetitionData(BaseModel):
     id: str
     name: str
     fullName: str
     badge: str
-    matches: List[MatchData] = []
+    matches: list[MatchData] = []
 
     class Config:
         # Buena práctica: permite popular el modelo desde objetos ORM en el futuro
